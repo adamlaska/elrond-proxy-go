@@ -3,10 +3,10 @@ package process
 import (
 	"fmt"
 
-	"github.com/ElrondNetwork/elrond-go-core/core/check"
-	"github.com/ElrondNetwork/elrond-go-core/data/api"
-	"github.com/ElrondNetwork/elrond-proxy-go/common"
-	"github.com/ElrondNetwork/elrond-proxy-go/data"
+	"github.com/multiversx/mx-chain-core-go/core/check"
+	"github.com/multiversx/mx-chain-core-go/data/api"
+	"github.com/multiversx/mx-chain-proxy-go/common"
+	"github.com/multiversx/mx-chain-proxy-go/data"
 )
 
 const (
@@ -44,7 +44,7 @@ func (bp *BlocksProcessor) GetBlocksByRound(round uint64, options common.BlockQu
 	path := common.BuildUrlWithBlockQueryOptions(fmt.Sprintf("%s/%d", blockByRoundPath, round), options)
 
 	for _, shardID := range shardIDs {
-		observers, err := bp.proc.GetObservers(shardID)
+		observers, err := bp.proc.GetObservers(shardID, data.AvailabilityAll)
 		if err != nil {
 			return nil, err
 		}

@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ElrondNetwork/elrond-go-core/core/check"
-	"github.com/ElrondNetwork/elrond-proxy-go/config"
-	"github.com/ElrondNetwork/elrond-proxy-go/data"
+	"github.com/multiversx/mx-chain-core-go/core/check"
+	"github.com/multiversx/mx-chain-proxy-go/config"
+	"github.com/multiversx/mx-chain-proxy-go/data"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -16,7 +16,7 @@ func TestNewSimpleObserversProvider_EmptyObserversListShouldErr(t *testing.T) {
 
 	cfg := getDummyConfig()
 	cfg.Observers = make([]*data.NodeData, 0)
-	sop, err := NewSimpleNodesProvider(cfg.Observers, "path")
+	sop, err := NewSimpleNodesProvider(cfg.Observers, "path", uint32(len(cfg.Observers)))
 	assert.Nil(t, sop)
 	assert.Equal(t, ErrEmptyObserversList, err)
 }
@@ -25,7 +25,7 @@ func TestNewSimpleObserversProvider_ShouldWork(t *testing.T) {
 	t.Parallel()
 
 	cfg := getDummyConfig()
-	sop, err := NewSimpleNodesProvider(cfg.Observers, "path")
+	sop, err := NewSimpleNodesProvider(cfg.Observers, "path", uint32(len(cfg.Observers)))
 	assert.Nil(t, err)
 	assert.False(t, check.IfNil(sop))
 }
@@ -35,9 +35,9 @@ func TestSimpleObserversProvider_GetObserversByShardIdShouldErrBecauseInvalidSha
 
 	invalidShardId := uint32(37)
 	cfg := getDummyConfig()
-	cqop, _ := NewSimpleNodesProvider(cfg.Observers, "path")
+	cqop, _ := NewSimpleNodesProvider(cfg.Observers, "path", uint32(len(cfg.Observers)))
 
-	res, err := cqop.GetNodesByShardId(invalidShardId)
+	res, err := cqop.GetNodesByShardId(invalidShardId, "")
 	assert.Nil(t, res)
 	assert.Equal(t, ErrShardNotAvailable, err)
 }
@@ -47,9 +47,9 @@ func TestSimpleObserversProvider_GetObserversByShardIdShouldWork(t *testing.T) {
 
 	shardId := uint32(0)
 	cfg := getDummyConfig()
-	cqop, _ := NewSimpleNodesProvider(cfg.Observers, "path")
+	cqop, _ := NewSimpleNodesProvider(cfg.Observers, "path", uint32(len(cfg.Observers)))
 
-	res, err := cqop.GetNodesByShardId(shardId)
+	res, err := cqop.GetNodesByShardId(shardId, "")
 	assert.Nil(t, err)
 	assert.Equal(t, 1, len(res))
 }
@@ -58,9 +58,9 @@ func TestSimpleObserversProvider_GetAllObserversShouldWork(t *testing.T) {
 	t.Parallel()
 
 	cfg := getDummyConfig()
-	cqop, _ := NewSimpleNodesProvider(cfg.Observers, "path")
+	cqop, _ := NewSimpleNodesProvider(cfg.Observers, "path", uint32(len(cfg.Observers)))
 
-	res, _ := cqop.GetAllNodes()
+	res, _ := cqop.GetAllNodes("")
 	assert.Equal(t, 2, len(res))
 }
 
@@ -71,8 +71,7 @@ func TestSimpleObserversProvider_GetObserversByShardId_ConcurrentSafe(t *testing
 	numOfTimesToCallForEachRoutine := 6
 	mapCalledObservers := make(map[string]int)
 	mutMap := &sync.RWMutex{}
-	var observers []*data.NodeData
-	observers = []*data.NodeData{
+	observers := []*data.NodeData{
 		{
 			Address: "addr1",
 			ShardId: shardId0,
@@ -106,13 +105,13 @@ func TestSimpleObserversProvider_GetObserversByShardId_ConcurrentSafe(t *testing
 	// will be called
 	expectedNumOfTimesAnObserverIsCalled := numOfTimesToCallForEachRoutine * numOfGoRoutinesToStart
 
-	sop, _ := NewSimpleNodesProvider(cfg.Observers, "path")
+	sop, _ := NewSimpleNodesProvider(cfg.Observers, "path", uint32(len(cfg.Observers)))
 
 	for i := 0; i < numOfGoRoutinesToStart; i++ {
 		for j := 0; j < numOfTimesToCallForEachRoutine; j++ {
 			go func(mutMap *sync.RWMutex, mapCalledObs map[string]int) {
-				obsSh0, _ := sop.GetNodesByShardId(shardId0)
-				obsSh1, _ := sop.GetNodesByShardId(shardId1)
+				obsSh0, _ := sop.GetNodesByShardId(shardId0, "")
+				obsSh1, _ := sop.GetNodesByShardId(shardId1, "")
 				mutMap.Lock()
 				mapCalledObs[obsSh0[0].Address]++
 				mapCalledObs[obsSh1[0].Address]++
@@ -135,8 +134,7 @@ func TestSimpleObserversProvider_GetAllObservers_ConcurrentSafe(t *testing.T) {
 	numOfTimesToCallForEachRoutine := 6
 	mapCalledObservers := make(map[string]int)
 	mutMap := &sync.RWMutex{}
-	var observers []*data.NodeData
-	observers = []*data.NodeData{
+	observers := []*data.NodeData{
 		{
 			Address: "addr1",
 			ShardId: shardId0,
@@ -170,12 +168,12 @@ func TestSimpleObserversProvider_GetAllObservers_ConcurrentSafe(t *testing.T) {
 	// will be called
 	expectedNumOfTimesAnObserverIsCalled := numOfTimesToCallForEachRoutine * numOfGoRoutinesToStart
 
-	sop, _ := NewSimpleNodesProvider(cfg.Observers, "path")
+	sop, _ := NewSimpleNodesProvider(cfg.Observers, "path", uint32(len(cfg.Observers)))
 
 	for i := 0; i < numOfGoRoutinesToStart; i++ {
 		for j := 0; j < numOfTimesToCallForEachRoutine; j++ {
 			go func(mutMap *sync.RWMutex, mapCalledObs map[string]int) {
-				obs, _ := sop.GetAllNodes()
+				obs, _ := sop.GetAllNodes("")
 				mutMap.Lock()
 				mapCalledObs[obs[0].Address]++
 				mutMap.Unlock()

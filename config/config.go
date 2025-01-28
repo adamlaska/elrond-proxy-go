@@ -1,8 +1,7 @@
 package config
 
 import (
-	"github.com/ElrondNetwork/elrond-go/config"
-	"github.com/ElrondNetwork/elrond-proxy-go/data"
+	"github.com/multiversx/mx-chain-proxy-go/data"
 )
 
 // GeneralSettingsConfig will hold the general settings for a node
@@ -17,17 +16,31 @@ type GeneralSettingsConfig struct {
 	BalancedObservers                        bool
 	BalancedFullHistoryNodes                 bool
 	AllowEntireTxPoolFetch                   bool
+	NumShardsTimeoutInSec                    int
+	TimeBetweenNodesRequestsInSec            int
 }
 
 // Config will hold the whole config file's data
 type Config struct {
 	GeneralSettings        GeneralSettingsConfig
-	AddressPubkeyConverter config.PubkeyConfig
-	Marshalizer            config.TypeConfig
-	Hasher                 config.TypeConfig
+	AddressPubkeyConverter PubkeyConfig
+	Marshalizer            TypeConfig
+	Hasher                 TypeConfig
 	ApiLogging             ApiLoggingConfig
 	Observers              []*data.NodeData
 	FullHistoryNodes       []*data.NodeData
+}
+
+// TypeConfig will map the string type configuration
+type TypeConfig struct {
+	Type string
+}
+
+// PubkeyConfig will map the public key configuration
+type PubkeyConfig struct {
+	Length          int
+	Type            string
+	SignatureLength int
 }
 
 // ApiLoggingConfig holds the configuration related to API requests logging
@@ -39,5 +52,5 @@ type ApiLoggingConfig struct {
 // CredentialsConfig holds the credential pairs
 type CredentialsConfig struct {
 	Credentials []data.Credential
-	Hasher      config.TypeConfig
+	Hasher      TypeConfig
 }

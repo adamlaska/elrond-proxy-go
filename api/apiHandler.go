@@ -1,9 +1,9 @@
 package api
 
 import (
-	"github.com/ElrondNetwork/elrond-go-core/core/check"
-	"github.com/ElrondNetwork/elrond-proxy-go/api/groups"
-	"github.com/ElrondNetwork/elrond-proxy-go/data"
+	"github.com/multiversx/mx-chain-core-go/core/check"
+	"github.com/multiversx/mx-chain-proxy-go/api/groups"
+	"github.com/multiversx/mx-chain-proxy-go/data"
 )
 
 // apiHandler will handle the groups specific to an API version
@@ -45,11 +45,6 @@ func initBaseGroupsWithFacade(facade data.FacadeHandler) (map[string]data.GroupH
 	}
 
 	blocksGroup, err := groups.NewBlocksGroup(facade)
-	if err != nil {
-		return nil, err
-	}
-
-	blockAtlasGroup, err := groups.NewBlockAtlasGroup(facade)
 	if err != nil {
 		return nil, err
 	}
@@ -99,13 +94,17 @@ func initBaseGroupsWithFacade(facade data.FacadeHandler) (map[string]data.GroupH
 		return nil, err
 	}
 
+	aboutGroup, err := groups.NewAboutGroup(facade)
+	if err != nil {
+		return nil, err
+	}
+
 	return map[string]data.GroupHandler{
 		"/actions":     actionsGroup,
 		"/address":     accountsGroup,
 		"/block":       blockGroup,
 		"/blocks":      blocksGroup,
 		"/internal":    internalGroup,
-		"/block-atlas": blockAtlasGroup,
 		"/hyperblock":  hyperBlocksGroup,
 		"/network":     networkGroup,
 		"/node":        nodeGroup,
@@ -114,6 +113,7 @@ func initBaseGroupsWithFacade(facade data.FacadeHandler) (map[string]data.GroupH
 		"/validator":   validatorsGroup,
 		"/vm-values":   vmValuesGroup,
 		"/proof":       proofGroup,
+		"/about":       aboutGroup,
 	}, nil
 }
 

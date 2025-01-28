@@ -6,13 +6,13 @@ import (
 	"math/big"
 	"net/http"
 
-	"github.com/ElrondNetwork/elrond-go-core/core"
-	"github.com/ElrondNetwork/elrond-go-core/core/check"
-	"github.com/ElrondNetwork/elrond-go-core/data/transaction"
-	"github.com/ElrondNetwork/elrond-go-core/hashing"
-	"github.com/ElrondNetwork/elrond-go-core/marshal"
-	"github.com/ElrondNetwork/elrond-proxy-go/api/errors"
-	"github.com/ElrondNetwork/elrond-proxy-go/data"
+	"github.com/multiversx/mx-chain-core-go/core"
+	"github.com/multiversx/mx-chain-core-go/core/check"
+	"github.com/multiversx/mx-chain-core-go/data/transaction"
+	"github.com/multiversx/mx-chain-core-go/hashing"
+	"github.com/multiversx/mx-chain-core-go/marshal"
+	"github.com/multiversx/mx-chain-proxy-go/api/errors"
+	"github.com/multiversx/mx-chain-proxy-go/data"
 )
 
 // TransactionPath defines the transaction group path of the node
@@ -30,16 +30,23 @@ const TransactionSimulatePath = "/transaction/simulate"
 // MultipleTransactionsPath defines the multiple transactions send path of the node
 const MultipleTransactionsPath = "/transaction/send-multiple"
 
-// UnknownStatusTx defines the response that should be received from an observer when transaction status is unknown
-const UnknownStatusTx = "unknown"
+// SCRsByTxHash defines smart contract results by transaction hash path of the node
+const SCRsByTxHash = "/transaction/scrs-by-tx-hash/"
 
 const (
-	withResultsParam    = "?withResults=true"
-	checkSignatureFalse = "?checkSignature=false"
-	bySenderParam       = "&by-sender="
-	fieldsParam         = "?fields="
-	lastNonceParam      = "?last-nonce=true"
-	nonceGapsParam      = "?nonce-gaps=true"
+	withResultsParam                = "?withResults=true"
+	scrHashParam                    = "?scrHash=%s"
+	checkSignatureFalse             = "?checkSignature=false"
+	bySenderParam                   = "&by-sender="
+	fieldsParam                     = "?fields="
+	lastNonceParam                  = "?last-nonce=true"
+	nonceGapsParam                  = "?nonce-gaps=true"
+	internalVMErrorsEventIdentifier = "internalVMErrors" // TODO export this in mx-chain-core-go, remove unexported definitions from mx-chain-vm's
+	moveBalanceDescriptor           = "MoveBalance"
+	relayedV1TransactionDescriptor  = "RelayedTx"
+	relayedV2TransactionDescriptor  = "RelayedTxV2"
+	relayedV3TransactionDescriptor  = "RelayedTxV3"
+	emptyDataStr                    = ""
 )
 
 type requestType int
@@ -62,12 +69,18 @@ type erdTransaction struct {
 	Version   uint32 `json:"version"`
 }
 
+type tupleHashWasFetched struct {
+	hash    string
+	fetched bool
+}
+
 // TransactionProcessor is able to process transaction requests
 type TransactionProcessor struct {
 	proc                         Processor
 	pubKeyConverter              core.PubkeyConverter
 	hasher                       hashing.Hasher
 	marshalizer                  marshal.Marshalizer
+	relayedTxsMarshaller         marshal.Marshalizer
 	newTxCostProcessor           func() (TransactionCostHandler, error)
 	mergeLogsHandler             LogsMergerHandler
 	shouldAllowEntireTxPoolFetch bool
@@ -102,6 +115,9 @@ func NewTransactionProcessor(
 		return nil, ErrNilLogsMerger
 	}
 
+	// no reason to get this from configs. If we are going to change the marshaller for the relayed transaction v1,
+	// we will need also an enable epoch handler
+	relayedTxsMarshaller := &marshal.JsonMarshalizer{}
 	return &TransactionProcessor{
 		proc:                         proc,
 		pubKeyConverter:              pubKeyConverter,
@@ -110,6 +126,7 @@ func NewTransactionProcessor(
 		newTxCostProcessor:           newTxCostProcessor,
 		mergeLogsHandler:             logsMerger,
 		shouldAllowEntireTxPoolFetch: allowEntireTxPoolFetch,
+		relayedTxsMarshaller:         relayedTxsMarshaller,
 	}, nil
 }
 
@@ -130,15 +147,15 @@ func (tp *TransactionProcessor) SendTransaction(tx *data.Transaction) (int, stri
 		return http.StatusInternalServerError, "", err
 	}
 
-	observers, err := tp.proc.GetObservers(shardID)
+	observers, err := tp.proc.GetObservers(shardID, data.AvailabilityRecent)
 	if err != nil {
 		return http.StatusInternalServerError, "", err
 	}
 
+	txResponse := data.ResponseTransaction{}
 	for _, observer := range observers {
-		txResponse := &data.ResponseTransaction{}
 
-		respCode, err := tp.proc.CallPostRestEndPoint(observer.Address, TransactionSendPath, tx, txResponse)
+		respCode, err := tp.proc.CallPostRestEndPoint(observer.Address, TransactionSendPath, tx, &txResponse)
 		if respCode == http.StatusOK && err == nil {
 			log.Info(fmt.Sprintf("Transaction sent successfully to observer %v from shard %v, received tx hash %s",
 				observer.Address,
@@ -158,7 +175,7 @@ func (tp *TransactionProcessor) SendTransaction(tx *data.Transaction) (int, stri
 		return respCode, "", err
 	}
 
-	return http.StatusInternalServerError, "", ErrSendingRequest
+	return http.StatusInternalServerError, "", WrapObserversError(txResponse.Error)
 }
 
 // SimulateTransaction relays the post request by sending the request to the right observer and replies back the answer
@@ -178,7 +195,7 @@ func (tp *TransactionProcessor) SimulateTransaction(tx *data.Transaction, checkS
 		return nil, err
 	}
 
-	observers, err := tp.proc.GetObservers(senderShardID)
+	observers, err := tp.proc.GetObservers(senderShardID, data.AvailabilityRecent)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +223,7 @@ func (tp *TransactionProcessor) SimulateTransaction(tx *data.Transaction, checkS
 		}, nil
 	}
 
-	observersForReceiverShard, err := tp.proc.GetObservers(receiverShardID)
+	observersForReceiverShard, err := tp.proc.GetObservers(receiverShardID, data.AvailabilityRecent)
 	if err != nil {
 		return nil, err
 	}
@@ -239,17 +256,17 @@ func (tp *TransactionProcessor) simulateTransaction(
 		txSimulatePath += checkSignatureFalse
 	}
 
+	txResponse := data.ResponseTransactionSimulation{}
 	for _, observer := range observers {
-		txResponse := &data.ResponseTransactionSimulation{}
 
-		respCode, err := tp.proc.CallPostRestEndPoint(observer.Address, txSimulatePath, tx, txResponse)
+		respCode, err := tp.proc.CallPostRestEndPoint(observer.Address, txSimulatePath, tx, &txResponse)
 		if respCode == http.StatusOK && err == nil {
 			log.Info(fmt.Sprintf("Transaction simulation sent successfully to observer %v from shard %v, received tx hash %s",
 				observer.Address,
 				observer.ShardId,
 				txResponse.Data.Result.Hash,
 			))
-			return txResponse, nil
+			return &txResponse, nil
 		}
 
 		// if observer was down (or didn't respond in time), skip to the next one
@@ -262,7 +279,7 @@ func (tp *TransactionProcessor) simulateTransaction(
 		return nil, err
 	}
 
-	return nil, ErrSendingRequest
+	return nil, WrapObserversError(txResponse.Error)
 }
 
 // SendMultipleTransactions relays the post request by sending the request to the first available observer and replies back the answer
@@ -293,7 +310,7 @@ func (tp *TransactionProcessor) SendMultipleTransactions(txs []*data.Transaction
 	txsHashes := make(map[int]string)
 	txsByShardID := tp.groupTxsByShard(txsToSend)
 	for shardID, groupOfTxs := range txsByShardID {
-		observersInShard, err := tp.proc.GetObservers(shardID)
+		observersInShard, err := tp.proc.GetObservers(shardID, data.AvailabilityRecent)
 		if err != nil {
 			return data.MultipleTransactionsResponseData{}, ErrMissingObserver
 		}
@@ -350,6 +367,7 @@ func (tp *TransactionProcessor) GetTransaction(txHash string, withResults bool) 
 
 	tx.HyperblockNonce = tx.NotarizedAtDestinationInMetaNonce
 	tx.HyperblockHash = tx.NotarizedAtDestinationInMetaHash
+
 	return tx, nil
 }
 
@@ -357,9 +375,9 @@ func (tp *TransactionProcessor) GetTransaction(txHash string, withResults bool) 
 func (tp *TransactionProcessor) GetTransactionByHashAndSenderAddress(
 	txHash string,
 	sndAddr string,
-	withEvents bool,
+	withResults bool,
 ) (*transaction.ApiTransactionResult, int, error) {
-	tx, err := tp.getTxWithSenderAddr(txHash, sndAddr, withEvents)
+	tx, err := tp.getTxWithSenderAddr(txHash, sndAddr, withResults)
 	if err != nil {
 		return nil, http.StatusNotFound, err
 	}
@@ -388,26 +406,335 @@ func (tp *TransactionProcessor) getShardByAddress(address string) (uint32, error
 
 // GetTransactionStatus returns the status of a transaction
 func (tp *TransactionProcessor) GetTransactionStatus(txHash string, sender string) (string, error) {
-	if sender != "" {
-		tx, err := tp.getTxWithSenderAddr(txHash, sender, false)
-		if err != nil {
-			return UnknownStatusTx, err
-		}
-
-		return string(tx.Status), nil
-	}
-
-	// get status of transaction from random observers
-	tx, err := tp.getTxFromObservers(txHash, requestTypeObservers, false)
+	tx, err := tp.getTransaction(txHash, sender, false)
 	if err != nil {
-		return UnknownStatusTx, errors.ErrTransactionNotFound
+		return string(data.TxStatusUnknown), err
 	}
 
 	return string(tx.Status), nil
 }
 
+func (tp *TransactionProcessor) getTransaction(txHash string, sender string, withResults bool) (*transaction.ApiTransactionResult, error) {
+	if sender != "" {
+		return tp.getTxWithSenderAddr(txHash, sender, withResults)
+	}
+
+	// get status of transaction from random observers
+	return tp.getTxFromObservers(txHash, requestTypeObservers, withResults)
+}
+
+// GetProcessedTransactionStatus returns the status of a transaction after local processing
+func (tp *TransactionProcessor) GetProcessedTransactionStatus(txHash string) (*data.ProcessStatusResponse, error) {
+	const withResults = true
+	tx, err := tp.getTxFromObservers(txHash, requestTypeObservers, withResults)
+	if err != nil {
+		return &data.ProcessStatusResponse{
+			Status: string(data.TxStatusUnknown),
+		}, err
+	}
+
+	return tp.computeTransactionStatus(tx, withResults), nil
+}
+
+func (tp *TransactionProcessor) computeTransactionStatus(tx *transaction.ApiTransactionResult, withResults bool) *data.ProcessStatusResponse {
+	if !withResults {
+		return &data.ProcessStatusResponse{
+			Status: string(data.TxStatusUnknown),
+		}
+	}
+
+	if tx.Status == transaction.TxStatusInvalid {
+		return &data.ProcessStatusResponse{
+			Status: string(transaction.TxStatusFail),
+		}
+	}
+	if tx.Status != transaction.TxStatusSuccess {
+		return &data.ProcessStatusResponse{
+			Status: string(tx.Status),
+		}
+	}
+
+	if checkIfMoveBalanceNotarized(tx) {
+		return &data.ProcessStatusResponse{
+			Status: string(tx.Status),
+		}
+	}
+
+	allLogs, allScrs, err := tp.gatherAllLogsAndScrs(tx)
+	if err != nil {
+		log.Warn("error in TransactionProcessor.computeTransactionStatus", "error", err)
+		return &data.ProcessStatusResponse{
+			Status: string(data.TxStatusUnknown),
+		}
+	}
+
+	if hasPendingSCR(allScrs) {
+		return &data.ProcessStatusResponse{
+			Status: string(transaction.TxStatusPending),
+		}
+	}
+
+	txLogsOnFirstLevel := []*transaction.ApiLogs{tx.Logs}
+	failed, reason := checkIfFailed(txLogsOnFirstLevel)
+	if failed {
+		return &data.ProcessStatusResponse{
+			Status: string(transaction.TxStatusFail),
+			Reason: reason,
+		}
+	}
+
+	allLogs, err = tp.addMissingLogsOnProcessingExceptions(tx, allLogs, allScrs)
+	if err != nil {
+		log.Warn("error in TransactionProcessor.computeTransactionStatus on addMissingLogsOnProcessingExceptions call", "error", err)
+		return &data.ProcessStatusResponse{
+			Status: string(data.TxStatusUnknown),
+		}
+	}
+
+	failed, reason = checkIfFailed(allLogs)
+	if failed {
+		return &data.ProcessStatusResponse{
+			Status: string(transaction.TxStatusFail),
+			Reason: reason,
+		}
+	}
+
+	if checkIfFailedOnReturnMessage(allScrs, tx) {
+		return &data.ProcessStatusResponse{
+			Status: string(transaction.TxStatusFail),
+		}
+	}
+
+	isUnsigned := string(transaction.TxTypeUnsigned) == tx.Type
+	if checkIfCompleted(allLogs) || isUnsigned {
+		return &data.ProcessStatusResponse{
+			Status: string(transaction.TxStatusSuccess),
+		}
+	}
+
+	if checkIfRelayedV3Notarized(tx) {
+		return &data.ProcessStatusResponse{
+			Status: string(tx.Status),
+		}
+	}
+
+	return &data.ProcessStatusResponse{
+		Status: string(transaction.TxStatusPending),
+	}
+}
+
+func hasPendingSCR(scrs []*transaction.ApiTransactionResult) bool {
+	for _, scr := range scrs {
+		if scr.Status == transaction.TxStatusPending {
+			return true
+		}
+	}
+
+	return false
+}
+
+func checkIfFailedOnReturnMessage(allScrs []*transaction.ApiTransactionResult, tx *transaction.ApiTransactionResult) bool {
+	hasReturnMessageWithZeroValue := len(tx.ReturnMessage) > 0 && isZeroValue(tx.Value)
+	if hasReturnMessageWithZeroValue && !isRefundScr(tx.ReturnMessage) {
+		return true
+	}
+
+	for _, scr := range allScrs {
+		if isRefundScr(scr.ReturnMessage) {
+			continue
+		}
+
+		if len(scr.ReturnMessage) > 0 && isZeroValue(scr.Value) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isRefundScr(returnMessage string) bool {
+	return returnMessage == core.GasRefundForRelayerMessage
+}
+
+func isZeroValue(value string) bool {
+	if len(value) == 0 {
+		return true
+	}
+	return value == "0"
+}
+
+func checkIfFailed(logs []*transaction.ApiLogs) (bool, string) {
+	found, reason := findIdentifierInLogs(logs, internalVMErrorsEventIdentifier)
+	if found {
+		return true, reason
+	}
+
+	found, reason = findIdentifierInLogs(logs, core.SignalErrorOperation)
+	if found {
+		return true, reason
+	}
+
+	return false, emptyDataStr
+}
+
+func checkIfCompleted(logs []*transaction.ApiLogs) bool {
+	found, _ := findIdentifierInLogs(logs, core.CompletedTxEventIdentifier)
+	if found {
+		return true
+	}
+
+	found, _ = findIdentifierInLogs(logs, core.SCDeployIdentifier)
+	return found
+}
+
+func checkIfMoveBalanceNotarized(tx *transaction.ApiTransactionResult) bool {
+	isNotarized := tx.NotarizedAtSourceInMetaNonce > 0 && tx.NotarizedAtDestinationInMetaNonce > 0
+	if !isNotarized {
+		return false
+	}
+	isMoveBalance := tx.ProcessingTypeOnSource == moveBalanceDescriptor && tx.ProcessingTypeOnDestination == moveBalanceDescriptor
+
+	return isMoveBalance
+}
+
+func checkIfRelayedV3Notarized(tx *transaction.ApiTransactionResult) bool {
+	isNotarized := tx.NotarizedAtSourceInMetaNonce > 0 && tx.NotarizedAtDestinationInMetaNonce > 0
+	if !isNotarized {
+		return false
+	}
+	isRelayedV3 := tx.ProcessingTypeOnSource == relayedV3TransactionDescriptor && tx.ProcessingTypeOnDestination == relayedV3TransactionDescriptor
+
+	return isRelayedV3
+}
+
+func (tp *TransactionProcessor) addMissingLogsOnProcessingExceptions(
+	tx *transaction.ApiTransactionResult,
+	allLogs []*transaction.ApiLogs,
+	allScrs []*transaction.ApiTransactionResult,
+) ([]*transaction.ApiLogs, error) {
+	newLogs, err := tp.handleIntraShardRelayedMoveBalanceTransactions(tx, allScrs)
+	if err != nil {
+		return nil, err
+	}
+
+	allLogs = append(allLogs, newLogs...)
+
+	return allLogs, nil
+}
+
+func (tp *TransactionProcessor) handleIntraShardRelayedMoveBalanceTransactions(
+	tx *transaction.ApiTransactionResult,
+	allScrs []*transaction.ApiTransactionResult,
+) ([]*transaction.ApiLogs, error) {
+	var newLogs []*transaction.ApiLogs
+	isRelayedMoveBalanceTransaction, err := tp.isRelayedMoveBalanceTransaction(tx, allScrs)
+	if err != nil {
+		return newLogs, err
+	}
+
+	if isRelayedMoveBalanceTransaction {
+		newLogs = append(newLogs, &transaction.ApiLogs{
+			Address: tx.Sender,
+			Events: []*transaction.Events{
+				{
+					Address:    tx.Sender,
+					Identifier: core.CompletedTxEventIdentifier,
+				},
+			},
+		})
+	}
+
+	return newLogs, nil
+}
+
+func (tp *TransactionProcessor) isRelayedMoveBalanceTransaction(
+	tx *transaction.ApiTransactionResult,
+	allScrs []*transaction.ApiTransactionResult,
+) (bool, error) {
+	isNotarized := tx.NotarizedAtSourceInMetaNonce > 0 && tx.NotarizedAtDestinationInMetaNonce > 0
+	if !isNotarized {
+		return false, nil
+	}
+
+	isRelayedV1 := tx.ProcessingTypeOnSource == relayedV1TransactionDescriptor && tx.ProcessingTypeOnDestination == relayedV1TransactionDescriptor
+	isRelayedV2 := tx.ProcessingTypeOnSource == relayedV2TransactionDescriptor && tx.ProcessingTypeOnDestination == relayedV2TransactionDescriptor
+
+	isRelayedTransaction := isRelayedV1 || isRelayedV2
+	if !isRelayedTransaction {
+		return false, nil
+	}
+
+	if len(allScrs) == 0 {
+		return false, fmt.Errorf("no smart contracts results for the given relayed transaction v1")
+	}
+
+	firstScr := allScrs[0]
+	innerIsMoveBalance := firstScr.ProcessingTypeOnSource == moveBalanceDescriptor && firstScr.ProcessingTypeOnDestination == moveBalanceDescriptor
+
+	return innerIsMoveBalance, nil
+}
+
+func findIdentifierInLogs(logs []*transaction.ApiLogs, identifier string) (bool, string) {
+	if len(logs) == 0 {
+		return false, emptyDataStr
+	}
+
+	for _, logInstance := range logs {
+		if logInstance == nil {
+			continue
+		}
+
+		found, reason := findIdentifierInSingleLog(logInstance, identifier)
+		if found {
+			return true, string(reason)
+		}
+	}
+
+	return false, emptyDataStr
+}
+
+func findIdentifierInSingleLog(log *transaction.ApiLogs, identifier string) (bool, []byte) {
+	for _, event := range log.Events {
+		if event.Identifier == identifier {
+			return true, event.Data
+		}
+	}
+
+	return false, []byte(emptyDataStr)
+}
+
+func (tp *TransactionProcessor) gatherAllLogsAndScrs(tx *transaction.ApiTransactionResult) ([]*transaction.ApiLogs, []*transaction.ApiTransactionResult, error) {
+	const withResults = true
+	allLogs := make([]*transaction.ApiLogs, 0)
+	allScrs := make([]*transaction.ApiTransactionResult, 0)
+
+	if tx.Logs != nil {
+		allLogs = append(allLogs, tx.Logs)
+	}
+
+	for _, scrFromTx := range tx.SmartContractResults {
+		scr, err := tp.GetTransaction(scrFromTx.Hash, withResults)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w for scr hash %s", err, scrFromTx.Hash)
+		}
+
+		if scr == nil {
+			continue
+		}
+		allScrs = append(allScrs, scr)
+
+		if scr.Logs == nil {
+			continue
+		}
+		allLogs = append(allLogs, scr.Logs)
+	}
+
+	return allLogs, allScrs, nil
+}
+
 func (tp *TransactionProcessor) getTxFromObservers(txHash string, reqType requestType, withResults bool) (*transaction.ApiTransactionResult, error) {
 	observersShardIDs := tp.proc.GetShardIDs()
+	shardIDWasFetch := make(map[uint32]*tupleHashWasFetched)
 	for _, observerShardID := range observersShardIDs {
 		nodesInShard, err := tp.getNodesInShard(observerShardID, reqType)
 		if err != nil {
@@ -434,6 +761,10 @@ func (tp *TransactionProcessor) getTxFromObservers(txHash string, reqType reques
 				"sender address", getTxResponse.Data.Transaction.Sender,
 				"error", err.Error())
 		}
+		shardIDWasFetch[sndShardID] = &tupleHashWasFetched{
+			hash:    getTxResponse.Data.Transaction.Hash,
+			fetched: false,
+		}
 
 		rcvShardID, err := tp.getShardByAddress(getTxResponse.Data.Transaction.Receiver)
 		if err != nil {
@@ -441,35 +772,147 @@ func (tp *TransactionProcessor) getTxFromObservers(txHash string, reqType reques
 				"receiver address", getTxResponse.Data.Transaction.Receiver,
 				"error", err.Error())
 		}
+		shardIDWasFetch[rcvShardID] = &tupleHashWasFetched{
+			hash:    getTxResponse.Data.Transaction.Hash,
+			fetched: false,
+		}
 
 		isIntraShard := sndShardID == rcvShardID
 		observerIsInDestShard := rcvShardID == observerShardID
+
 		if isIntraShard {
-			return &getTxResponse.Data.Transaction, nil
+			shardIDWasFetch[sndShardID].fetched = true
+			if len(getTxResponse.Data.Transaction.SmartContractResults) == 0 {
+				return &getTxResponse.Data.Transaction, nil
+			}
+
+			tp.extraShardFromSCRs(getTxResponse.Data.Transaction.SmartContractResults, shardIDWasFetch)
 		}
 
 		if observerIsInDestShard {
 			// need to get transaction from source shard and merge scResults
 			// if withEvents is true
-			return tp.alterTxWithScResultsFromSourceIfNeeded(txHash, &getTxResponse.Data.Transaction, withResults), nil
+			txFromSource := tp.alterTxWithScResultsFromSourceIfNeeded(txHash, &getTxResponse.Data.Transaction, withResults, shardIDWasFetch)
+
+			tp.extraShardFromSCRs(txFromSource.SmartContractResults, shardIDWasFetch)
+
+			err = tp.fetchSCRSBasedOnShardMap(txFromSource, shardIDWasFetch)
+			if err != nil {
+				return nil, err
+			}
+
+			return txFromSource, nil
 		}
 
 		// get transaction from observer that is in destination shard
 		txFromDstShard, ok := tp.getTxFromDestShard(txHash, rcvShardID, withResults)
 		if ok {
+			tp.extraShardFromSCRs(txFromDstShard.SmartContractResults, shardIDWasFetch)
+
 			alteredTxFromDest := tp.mergeScResultsFromSourceAndDestIfNeeded(&getTxResponse.Data.Transaction, txFromDstShard, withResults)
+
+			err = tp.fetchSCRSBasedOnShardMap(alteredTxFromDest, shardIDWasFetch)
+			if err != nil {
+				return nil, err
+			}
+
 			return alteredTxFromDest, nil
 		}
 
 		// return transaction from observer from source shard
 		// if did not get ok responses from observers from destination shard
+
+		err = tp.fetchSCRSBasedOnShardMap(&getTxResponse.Data.Transaction, shardIDWasFetch)
+		if err != nil {
+			return nil, err
+		}
+
 		return &getTxResponse.Data.Transaction, nil
 	}
 
 	return nil, errors.ErrTransactionNotFound
 }
 
-func (tp *TransactionProcessor) alterTxWithScResultsFromSourceIfNeeded(txHash string, tx *transaction.ApiTransactionResult, withResults bool) *transaction.ApiTransactionResult {
+func (tp *TransactionProcessor) fetchSCRSBasedOnShardMap(tx *transaction.ApiTransactionResult, shardIDWasFetch map[uint32]*tupleHashWasFetched) error {
+	for shardID, info := range shardIDWasFetch {
+		scrs, err := tp.fetchSCRs(tx.Hash, info.hash, shardID)
+		if err != nil {
+			return err
+		}
+
+		scResults := append(tx.SmartContractResults, scrs...)
+		scResultsNew := tp.getScResultsUnion(scResults)
+
+		tx.SmartContractResults = scResultsNew
+		info.fetched = true
+	}
+
+	return nil
+}
+
+func (tp *TransactionProcessor) fetchSCRs(txHash, scrHash string, shardID uint32) ([]*transaction.ApiSmartContractResult, error) {
+	observers, err := tp.getNodesInShard(shardID, requestTypeFullHistoryNodes)
+	if err != nil {
+		return nil, err
+	}
+
+	apiPath := SCRsByTxHash + txHash + fmt.Sprintf(scrHashParam, scrHash)
+	for _, observer := range observers {
+		getTxResponseDst := &data.GetSCRsResponse{}
+		respCode, errG := tp.proc.CallGetRestEndPoint(observer.Address, apiPath, getTxResponseDst)
+		if errG != nil {
+			log.Trace("cannot get smart contract results", "address", observer.Address, "error", errG)
+			continue
+		}
+
+		if respCode != http.StatusOK {
+			continue
+		}
+
+		return getTxResponseDst.Data.SCRs, nil
+	}
+
+	return []*transaction.ApiSmartContractResult{}, nil
+
+}
+
+func (tp *TransactionProcessor) extraShardFromSCRs(scrs []*transaction.ApiSmartContractResult, shardIDWasFetch map[uint32]*tupleHashWasFetched) {
+	for _, scr := range scrs {
+		sndShardID, err := tp.getShardByAddress(scr.SndAddr)
+		if err != nil {
+			log.Warn("cannot compute shard ID from sender address",
+				"sender address", scr.SndAddr,
+				"error", err.Error())
+			continue
+		}
+
+		_, found := shardIDWasFetch[sndShardID]
+		if !found {
+			shardIDWasFetch[sndShardID] = &tupleHashWasFetched{
+				hash:    scr.Hash,
+				fetched: false,
+			}
+		}
+
+		rcvShardID, err := tp.getShardByAddress(scr.RcvAddr)
+		if err != nil {
+			log.Warn("cannot compute shard ID from receiver address",
+				"receiver address", scr.RcvAddr,
+				"error", err.Error())
+			continue
+		}
+
+		_, found = shardIDWasFetch[rcvShardID]
+		if !found {
+			shardIDWasFetch[rcvShardID] = &tupleHashWasFetched{
+				hash:    scr.Hash,
+				fetched: false,
+			}
+		}
+	}
+}
+
+func (tp *TransactionProcessor) alterTxWithScResultsFromSourceIfNeeded(txHash string, tx *transaction.ApiTransactionResult, withResults bool, shardIDWasFetch map[uint32]*tupleHashWasFetched) *transaction.ApiTransactionResult {
 	if !withResults || len(tx.SmartContractResults) == 0 {
 		return tx
 	}
@@ -486,20 +929,26 @@ func (tp *TransactionProcessor) alterTxWithScResultsFromSourceIfNeeded(txHash st
 		}
 
 		alteredTxFromDest := tp.mergeScResultsFromSourceAndDestIfNeeded(&getTxResponse.Data.Transaction, tx, withResults)
+
+		shardIDWasFetch[tx.SourceShard] = &tupleHashWasFetched{
+			hash:    getTxResponse.Data.Transaction.Hash,
+			fetched: true,
+		}
+
 		return alteredTxFromDest
 	}
 
 	return tx
 }
 
-func (tp *TransactionProcessor) getTxWithSenderAddr(txHash, sender string, withEvents bool) (*transaction.ApiTransactionResult, error) {
+func (tp *TransactionProcessor) getTxWithSenderAddr(txHash, sender string, withResults bool) (*transaction.ApiTransactionResult, error) {
 	observers, sndShardID, err := tp.getShardObserversForSender(sender, requestTypeFullHistoryNodes)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, observer := range observers {
-		getTxResponse, ok, _ := tp.getTxFromObserver(observer, txHash, withEvents)
+		getTxResponse, ok, _ := tp.getTxFromObserver(observer, txHash, withResults)
 		if !ok {
 			continue
 		}
@@ -516,9 +965,9 @@ func (tp *TransactionProcessor) getTxWithSenderAddr(txHash, sender string, withE
 			return &getTxResponse.Data.Transaction, nil
 		}
 
-		txFromDstShard, ok := tp.getTxFromDestShard(txHash, rcvShardID, withEvents)
+		txFromDstShard, ok := tp.getTxFromDestShard(txHash, rcvShardID, withResults)
 		if ok {
-			alteredTxFromDest := tp.mergeScResultsFromSourceAndDestIfNeeded(&getTxResponse.Data.Transaction, txFromDstShard, withEvents)
+			alteredTxFromDest := tp.mergeScResultsFromSourceAndDestIfNeeded(&getTxResponse.Data.Transaction, txFromDstShard, withResults)
 			return alteredTxFromDest, nil
 		}
 
@@ -546,7 +995,7 @@ func (tp *TransactionProcessor) mergeScResultsFromSourceAndDestIfNeeded(
 }
 
 func (tp *TransactionProcessor) getScResultsUnion(scResults []*transaction.ApiSmartContractResult) []*transaction.ApiSmartContractResult {
-	scResultsHash := make(map[string]*transaction.ApiSmartContractResult, 0)
+	scResultsHash := make(map[string]*transaction.ApiSmartContractResult)
 	for _, scResult := range scResults {
 		scResultFromMap, found := scResultsHash[scResult.Hash]
 		if !found {
@@ -598,7 +1047,7 @@ func (tp *TransactionProcessor) getTxFromObserver(
 
 func (tp *TransactionProcessor) getTxFromDestShard(txHash string, dstShardID uint32, withEvents bool) (*transaction.ApiTransactionResult, bool) {
 	// cross shard transaction
-	destinationShardObservers, err := tp.proc.GetObservers(dstShardID)
+	destinationShardObservers, err := tp.proc.GetObservers(dstShardID, data.AvailabilityAll)
 	if err != nil {
 		return nil, false
 	}
@@ -685,6 +1134,25 @@ func (tp *TransactionProcessor) checkTransactionFields(tx *data.Transaction) err
 		}
 	}
 
+	if len(tx.GuardianSignature) > 0 {
+		_, err = hex.DecodeString(tx.GuardianSignature)
+		if err != nil {
+			return &errors.ErrInvalidTxFields{
+				Message: errors.ErrInvalidGuardianSignatureHex.Error(),
+				Reason:  err.Error(),
+			}
+		}
+	}
+	if len(tx.GuardianAddr) > 0 {
+		_, err = tp.pubKeyConverter.Decode(tx.GuardianAddr)
+		if err != nil {
+			return &errors.ErrInvalidTxFields{
+				Message: errors.ErrInvalidGuardianAddress.Error(),
+				Reason:  err.Error(),
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -723,6 +1191,20 @@ func (tp *TransactionProcessor) ComputeTransactionHash(tx *data.Transaction) (st
 		Signature: signatureBytes,
 	}
 
+	if len(tx.GuardianAddr) > 0 {
+		regularTx.GuardianAddr, err = tp.pubKeyConverter.Decode(tx.GuardianAddr)
+		if err != nil {
+			return "", errors.ErrInvalidGuardianAddress
+		}
+	}
+
+	if len(tx.GuardianSignature) > 0 {
+		regularTx.GuardianSignature, err = hex.DecodeString(tx.GuardianSignature)
+		if err != nil {
+			return "", errors.ErrInvalidGuardianSignatureHex
+		}
+	}
+
 	txHash, err := core.CalculateHash(tp.marshalizer, tp.hasher, regularTx)
 	if err != nil {
 		return "", nil
@@ -733,13 +1215,13 @@ func (tp *TransactionProcessor) ComputeTransactionHash(tx *data.Transaction) (st
 
 func (tp *TransactionProcessor) getNodesInShard(shardID uint32, reqType requestType) ([]*data.NodeData, error) {
 	if reqType == requestTypeFullHistoryNodes {
-		fullHistoryNodes, err := tp.proc.GetFullHistoryNodes(shardID)
+		fullHistoryNodes, err := tp.proc.GetFullHistoryNodes(shardID, data.AvailabilityAll)
 		if err == nil && len(fullHistoryNodes) > 0 {
 			return fullHistoryNodes, nil
 		}
 	}
 
-	observers, err := tp.proc.GetObservers(shardID)
+	observers, err := tp.proc.GetObservers(shardID, data.AvailabilityAll)
 
 	return observers, err
 }

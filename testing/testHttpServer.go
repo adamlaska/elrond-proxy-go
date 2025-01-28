@@ -15,13 +15,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ElrondNetwork/elrond-go-core/core"
-	"github.com/ElrondNetwork/elrond-go-core/data/api"
-	"github.com/ElrondNetwork/elrond-go-core/data/transaction"
-	"github.com/ElrondNetwork/elrond-go-core/data/vm"
-	logger "github.com/ElrondNetwork/elrond-go-logger"
-	"github.com/ElrondNetwork/elrond-proxy-go/data"
 	"github.com/gin-gonic/gin"
+	"github.com/multiversx/mx-chain-core-go/core"
+	"github.com/multiversx/mx-chain-core-go/data/api"
+	"github.com/multiversx/mx-chain-core-go/data/transaction"
+	"github.com/multiversx/mx-chain-core-go/data/vm"
+	logger "github.com/multiversx/mx-chain-logger-go"
+	"github.com/multiversx/mx-chain-proxy-go/data"
 )
 
 var log = logger.GetOrCreate("testing")
@@ -238,7 +238,7 @@ func (ths *TestHttpServer) processRequestValidatorStatistics(rw http.ResponseWri
 			TotalNumValidatorSuccess:           8,
 			TotalNumValidatorFailure:           5,
 			TotalNumValidatorIgnoredSignatures: 120,
-			ShardID:                            core.MetachainShardId,
+			ShardId:                            core.MetachainShardId,
 			ValidatorStatus:                    "waiting",
 		},
 		"pubkey2": {
@@ -255,7 +255,7 @@ func (ths *TestHttpServer) processRequestValidatorStatistics(rw http.ResponseWri
 			TotalNumValidatorSuccess:           78,
 			TotalNumValidatorFailure:           25,
 			TotalNumValidatorIgnoredSignatures: 110,
-			ShardID:                            1,
+			ShardId:                            1,
 			ValidatorStatus:                    "eligible",
 		},
 	}

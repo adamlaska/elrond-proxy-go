@@ -3,11 +3,11 @@ package facade
 import (
 	"math/big"
 
-	"github.com/ElrondNetwork/elrond-go-core/data/transaction"
-	"github.com/ElrondNetwork/elrond-go-core/data/vm"
-	"github.com/ElrondNetwork/elrond-go-crypto"
-	"github.com/ElrondNetwork/elrond-proxy-go/common"
-	"github.com/ElrondNetwork/elrond-proxy-go/data"
+	"github.com/multiversx/mx-chain-core-go/data/transaction"
+	"github.com/multiversx/mx-chain-core-go/data/vm"
+	crypto "github.com/multiversx/mx-chain-crypto-go"
+	"github.com/multiversx/mx-chain-proxy-go/common"
+	"github.com/multiversx/mx-chain-proxy-go/data"
 )
 
 // ActionsProcessor defines what an actions processor should do
@@ -19,9 +19,9 @@ type ActionsProcessor interface {
 // AccountProcessor defines what an account request processor should do
 type AccountProcessor interface {
 	GetAccount(address string, options common.AccountQueryOptions) (*data.AccountModel, error)
+	GetAccounts(addresses []string, options common.AccountQueryOptions) (*data.AccountsModel, error)
 	GetShardIDForAddress(address string) (uint32, error)
 	GetValueForKey(address string, key string, options common.AccountQueryOptions) (string, error)
-	GetTransactions(address string) ([]data.DatabaseTransaction, error)
 	GetAllESDTTokens(address string, options common.AccountQueryOptions) (*data.GenericAPIResponse, error)
 	GetKeyValuePairs(address string, options common.AccountQueryOptions) (*data.GenericAPIResponse, error)
 	GetESDTTokenData(address string, key string, options common.AccountQueryOptions) (*data.GenericAPIResponse, error)
@@ -29,6 +29,9 @@ type AccountProcessor interface {
 	GetESDTsRoles(address string, options common.AccountQueryOptions) (*data.GenericAPIResponse, error)
 	GetESDTNftTokenData(address string, key string, nonce uint64, options common.AccountQueryOptions) (*data.GenericAPIResponse, error)
 	GetNFTTokenIDsRegisteredByAddress(address string, options common.AccountQueryOptions) (*data.GenericAPIResponse, error)
+	GetCodeHash(address string, options common.AccountQueryOptions) (*data.GenericAPIResponse, error)
+	GetGuardianData(address string, options common.AccountQueryOptions) (*data.GenericAPIResponse, error)
+	IsDataTrieMigrated(address string, options common.AccountQueryOptions) (*data.GenericAPIResponse, error)
 }
 
 // TransactionProcessor defines what a transaction request processor should do
@@ -39,6 +42,7 @@ type TransactionProcessor interface {
 	TransactionCostRequest(tx *data.Transaction) (*data.TxCostResponseData, error)
 	GetTransactionStatus(txHash string, sender string) (string, error)
 	GetTransaction(txHash string, withEvents bool) (*transaction.ApiTransactionResult, error)
+	GetProcessedTransactionStatus(txHash string) (*data.ProcessStatusResponse, error)
 	GetTransactionByHashAndSenderAddress(txHash string, sndAddr string, withEvents bool) (*transaction.ApiTransactionResult, int, error)
 	ComputeTransactionHash(tx *data.Transaction) (string, error)
 	GetTransactionsPool(fields string) (*data.TransactionsPool, error)
@@ -51,24 +55,27 @@ type TransactionProcessor interface {
 // ProofProcessor defines what a proof request processor should do
 type ProofProcessor interface {
 	GetProof(rootHash string, address string) (*data.GenericAPIResponse, error)
+	GetProofDataTrie(rootHash string, address string, key string) (*data.GenericAPIResponse, error)
 	GetProofCurrentRootHash(address string) (*data.GenericAPIResponse, error)
 	VerifyProof(rootHash string, address string, proof []string) (*data.GenericAPIResponse, error)
 }
 
 // SCQueryService defines how data should be get from a SC account
 type SCQueryService interface {
-	ExecuteQuery(query *data.SCQuery) (*vm.VMOutputApi, error)
+	ExecuteQuery(query *data.SCQuery) (*vm.VMOutputApi, data.BlockInfo, error)
 }
 
 // NodeGroupProcessor defines what a node group processor should do
 type NodeGroupProcessor interface {
 	GetHeartbeatData() (*data.HeartbeatResponse, error)
 	IsOldStorageForToken(tokenID string, nonce uint64) (bool, error)
+	GetWaitingEpochsLeftForPublicKey(publicKey string) (*data.WaitingEpochsLeftApiResponse, error)
 }
 
 // ValidatorStatisticsProcessor defines what a validator statistics processor should do
 type ValidatorStatisticsProcessor interface {
 	GetValidatorStatistics() (*data.ValidatorStatisticsResponse, error)
+	GetAuctionList() (*data.AuctionListResponse, error)
 }
 
 // ESDTSupplyProcessor defines what an esdt supply processor should do
@@ -89,6 +96,8 @@ type NodeStatusProcessor interface {
 	GetRatingsConfig() (*data.GenericAPIResponse, error)
 	GetGenesisNodesPubKeys() (*data.GenericAPIResponse, error)
 	GetGasConfigs() (*data.GenericAPIResponse, error)
+	GetTriesStatistics(shardID uint32) (*data.TrieStatisticsAPIResponse, error)
+	GetEpochStartData(epoch uint32, shardID uint32) (*data.GenericAPIResponse, error)
 }
 
 // BlocksProcessor defines what a blocks processor should do
@@ -98,7 +107,6 @@ type BlocksProcessor interface {
 
 // BlockProcessor defines what a block processor should do
 type BlockProcessor interface {
-	GetAtlasBlockByShardIDAndNonce(shardID uint32, nonce uint64) (data.AtlasBlock, error)
 	GetBlockByHash(shardID uint32, hash string, options common.BlockQueryOptions) (*data.BlockApiResponse, error)
 	GetBlockByNonce(shardID uint32, nonce uint64, options common.BlockQueryOptions) (*data.BlockApiResponse, error)
 	GetHyperBlockByHash(hash string, options common.HyperblockQueryOptions) (*data.HyperblockApiResponse, error)
@@ -108,6 +116,10 @@ type BlockProcessor interface {
 	GetInternalBlockByNonce(shardID uint32, nonce uint64, format common.OutputFormat) (*data.InternalBlockApiResponse, error)
 	GetInternalMiniBlockByHash(shardID uint32, hash string, epoch uint32, format common.OutputFormat) (*data.InternalMiniBlockApiResponse, error)
 	GetInternalStartOfEpochMetaBlock(epoch uint32, format common.OutputFormat) (*data.InternalBlockApiResponse, error)
+
+	GetAlteredAccountsByNonce(shardID uint32, nonce uint64, options common.GetAlteredAccountsForBlockOptions) (*data.AlteredAccountsApiResponse, error)
+	GetAlteredAccountsByHash(shardID uint32, hash string, options common.GetAlteredAccountsForBlockOptions) (*data.AlteredAccountsApiResponse, error)
+	GetInternalStartOfEpochValidatorsInfo(epoch uint32) (*data.ValidatorsInfoApiResponse, error)
 }
 
 // FaucetProcessor defines what a component which will handle faucets should do
@@ -128,4 +140,10 @@ type FaucetProcessor interface {
 type StatusProcessor interface {
 	GetMetrics() map[string]*data.EndpointMetrics
 	GetMetricsForPrometheus() string
+}
+
+// AboutInfoProcessor defines the behaviour of about info processor
+type AboutInfoProcessor interface {
+	GetAboutInfo() *data.GenericAPIResponse
+	GetNodesVersions() (*data.GenericAPIResponse, error)
 }

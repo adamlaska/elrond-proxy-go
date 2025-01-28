@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ElrondNetwork/elrond-go-core/core"
-	"github.com/ElrondNetwork/elrond-go/sharding"
-	"github.com/ElrondNetwork/elrond-proxy-go/data"
-	"github.com/ElrondNetwork/elrond-proxy-go/process"
-	"github.com/ElrondNetwork/elrond-proxy-go/process/mock"
+	"github.com/multiversx/mx-chain-core-go/core"
+	"github.com/multiversx/mx-chain-core-go/core/sharding"
+	"github.com/multiversx/mx-chain-proxy-go/data"
+	"github.com/multiversx/mx-chain-proxy-go/process"
+	"github.com/multiversx/mx-chain-proxy-go/process/mock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -53,6 +53,7 @@ func TestNewBaseProcessor_WithInvalidRequestTimeoutShouldErr(t *testing.T) {
 		&mock.ObserversProviderStub{},
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 
 	assert.Nil(t, bp)
@@ -68,6 +69,7 @@ func TestNewBaseProcessor_WithNilShardCoordinatorShouldErr(t *testing.T) {
 		&mock.ObserversProviderStub{},
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 
 	assert.Nil(t, bp)
@@ -83,6 +85,7 @@ func TestNewBaseProcessor_WithNilObserversProviderShouldErr(t *testing.T) {
 		&mock.ObserversProviderStub{},
 		nil,
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 
 	assert.Nil(t, bp)
@@ -98,6 +101,7 @@ func TestNewBaseProcessor_WithNilFullHistoryNodesProviderShouldErr(t *testing.T)
 		nil,
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 
 	assert.Nil(t, bp)
@@ -113,6 +117,7 @@ func TestNewBaseProcessor_WithOkValuesShouldWork(t *testing.T) {
 		&mock.ObserversProviderStub{},
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 
 	assert.NotNil(t, bp)
@@ -129,14 +134,15 @@ func TestBaseProcessor_GetObserversEmptyListShouldWork(t *testing.T) {
 		5,
 		&mock.ShardCoordinatorMock{},
 		&mock.ObserversProviderStub{
-			GetNodesByShardIdCalled: func(_ uint32) ([]*data.NodeData, error) {
+			GetNodesByShardIdCalled: func(_ uint32, _ data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
 				return observersSlice, nil
 			},
 		},
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
-	observers, err := bp.GetObservers(0)
+	observers, err := bp.GetObservers(0, data.AvailabilityAll)
 
 	assert.Nil(t, err)
 	assert.Equal(t, observersSlice, observers)
@@ -163,12 +169,13 @@ func TestBaseProcessor_ComputeShardId(t *testing.T) {
 		5,
 		msc,
 		&mock.ObserversProviderStub{
-			GetNodesByShardIdCalled: func(_ uint32) ([]*data.NodeData, error) {
+			GetNodesByShardIdCalled: func(_ uint32, _ data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
 				return observersList, nil
 			},
 		},
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 
 	//there are 2 shards, compute ID should correctly process
@@ -203,6 +210,7 @@ func TestBaseProcessor_CallGetRestEndPoint(t *testing.T) {
 		&mock.ObserversProviderStub{},
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 	_, err := bp.CallGetRestEndPoint(server.URL, "/some/path", tsRecovered)
 
@@ -231,6 +239,7 @@ func TestBaseProcessor_CallGetRestEndPointShouldTimeout(t *testing.T) {
 		&mock.ObserversProviderStub{},
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 	_, err := bp.CallGetRestEndPoint(testServer.URL, "/some/path", tsRecovered)
 
@@ -255,6 +264,7 @@ func TestBaseProcessor_CallPostRestEndPoint(t *testing.T) {
 		&mock.ObserversProviderStub{},
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 	rc, err := bp.CallPostRestEndPoint(server.URL, "/some/path", ts, tsRecv)
 
@@ -285,6 +295,7 @@ func TestBaseProcessor_CallPostRestEndPointShouldTimeout(t *testing.T) {
 		&mock.ObserversProviderStub{},
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 	rc, err := bp.CallPostRestEndPoint(testServer.URL, "/some/path", ts, tsRecv)
 
@@ -319,17 +330,18 @@ func TestBaseProcessor_GetAllObserversWithOkValuesShouldPass(t *testing.T) {
 		5,
 		&mock.ShardCoordinatorMock{},
 		&mock.ObserversProviderStub{
-			GetAllNodesCalled: func() ([]*data.NodeData, error) {
+			GetAllNodesCalled: func(_ data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
 				return observersList, nil
 			},
 		},
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 
 	assert.Nil(t, err)
 
-	observers, _ := bp.GetAllObservers()
+	observers, _ := bp.GetAllObservers(data.AvailabilityAll)
 	assert.Nil(t, err)
 	assert.Equal(t, server.URL, observers[0].Address)
 }
@@ -360,7 +372,7 @@ func TestBaseProcessor_GetObserversOnePerShardShouldWork(t *testing.T) {
 		5,
 		&mock.ShardCoordinatorMock{NumShards: 2},
 		&mock.ObserversProviderStub{
-			GetNodesByShardIdCalled: func(shardId uint32) ([]*data.NodeData, error) {
+			GetNodesByShardIdCalled: func(shardId uint32, dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
 				switch shardId {
 				case 0:
 					return observersListShard0, nil
@@ -375,9 +387,10 @@ func TestBaseProcessor_GetObserversOnePerShardShouldWork(t *testing.T) {
 		},
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 
-	observers, err := bp.GetObserversOnePerShard()
+	observers, err := bp.GetObserversOnePerShard(data.AvailabilityAll)
 	assert.NoError(t, err)
 
 	for i := 0; i < len(observers); i++ {
@@ -408,7 +421,7 @@ func TestBaseProcessor_GetObserversOnePerShardOneShardHasNoObserverShouldWork(t 
 		5,
 		&mock.ShardCoordinatorMock{NumShards: 2},
 		&mock.ObserversProviderStub{
-			GetNodesByShardIdCalled: func(shardId uint32) ([]*data.NodeData, error) {
+			GetNodesByShardIdCalled: func(shardId uint32, dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
 				switch shardId {
 				case 0:
 					return observersListShard0, nil
@@ -423,9 +436,10 @@ func TestBaseProcessor_GetObserversOnePerShardOneShardHasNoObserverShouldWork(t 
 		},
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 
-	observers, err := bp.GetObserversOnePerShard()
+	observers, err := bp.GetObserversOnePerShard(data.AvailabilityAll)
 	assert.NoError(t, err)
 
 	for i := 0; i < len(observers); i++ {
@@ -456,7 +470,7 @@ func TestBaseProcessor_GetObserversOnePerShardMetachainHasNoObserverShouldWork(t
 		5,
 		&mock.ShardCoordinatorMock{NumShards: 2},
 		&mock.ObserversProviderStub{
-			GetNodesByShardIdCalled: func(shardId uint32) ([]*data.NodeData, error) {
+			GetNodesByShardIdCalled: func(shardId uint32, dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
 				switch shardId {
 				case 0:
 					return observersListShard0, nil
@@ -471,9 +485,10 @@ func TestBaseProcessor_GetObserversOnePerShardMetachainHasNoObserverShouldWork(t
 		},
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 
-	observers, err := bp.GetObserversOnePerShard()
+	observers, err := bp.GetObserversOnePerShard(data.AvailabilityAll)
 	assert.NoError(t, err)
 
 	for i := 0; i < len(observers); i++ {
@@ -509,7 +524,7 @@ func TestBaseProcessor_GetFullHistoryNodesOnePerShardShouldWork(t *testing.T) {
 		&mock.ShardCoordinatorMock{NumShards: 2},
 		&mock.ObserversProviderStub{},
 		&mock.ObserversProviderStub{
-			GetNodesByShardIdCalled: func(shardId uint32) ([]*data.NodeData, error) {
+			GetNodesByShardIdCalled: func(shardId uint32, dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
 				switch shardId {
 				case 0:
 					return observersListShard0, nil
@@ -523,9 +538,10 @@ func TestBaseProcessor_GetFullHistoryNodesOnePerShardShouldWork(t *testing.T) {
 			},
 		},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 
-	observers, err := bp.GetFullHistoryNodesOnePerShard()
+	observers, err := bp.GetFullHistoryNodesOnePerShard(data.AvailabilityAll)
 	assert.NoError(t, err)
 
 	for i := 0; i < len(observers); i++ {
@@ -543,6 +559,7 @@ func TestBaseProcessor_GetShardIDs(t *testing.T) {
 		&mock.ObserversProviderStub{},
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 
 	expected := []uint32{0, 1, 2, core.MetachainShardId}
@@ -570,6 +587,7 @@ func TestBaseProcessor_HandleNodesSyncStateShouldSetNodeOutOfSyncIfVMQueriesNotR
 		},
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 
 	bp.SetNodeStatusFetcher(func(url string) (*data.NodeStatusAPIResponse, int, error) {
@@ -630,6 +648,7 @@ func TestBaseProcessor_HandleNodesSyncStateShouldTreatObserverThatWasDown(t *tes
 		},
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 
 	bp.SetNodeStatusFetcher(func(url string) (*data.NodeStatusAPIResponse, int, error) {
@@ -691,6 +710,7 @@ func TestBaseProcessor_HandleNodesSyncStateShouldBeTriggeredEarlierIfANodeIsOffl
 		},
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 
 	bp.SetNodeStatusFetcher(func(url string) (*data.NodeStatusAPIResponse, int, error) {
@@ -739,6 +759,7 @@ func TestBaseProcessor_HandleNodesSyncStateShouldConsiderNodeAsOnlineIfProbableN
 		},
 		&mock.ObserversProviderStub{},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 
 	bp.SetNodeStatusFetcher(func(url string) (*data.NodeStatusAPIResponse, int, error) {
@@ -798,6 +819,7 @@ func TestBaseProcessor_HandleNodesSyncState(t *testing.T) {
 			},
 		},
 		&mock.PubKeyConverterMock{},
+		false,
 	)
 
 	bp.SetNodeStatusFetcher(func(url string) (*data.NodeStatusAPIResponse, int, error) {
@@ -822,6 +844,45 @@ func TestBaseProcessor_HandleNodesSyncState(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	require.GreaterOrEqual(t, atomic.LoadUint32(&numTimesUpdateNodesWasCalled), uint32(2))
+
+	_ = bp.Close()
+	time.Sleep(50 * time.Millisecond)
+}
+
+func TestBaseProcessor_NoStatusCheck(t *testing.T) {
+
+	numPrintNodesInShardsCalled := uint32(0)
+	bp, _ := process.NewBaseProcessor(
+		5,
+		&mock.ShardCoordinatorMock{},
+		&mock.ObserversProviderStub{
+			GetAllNodesWithSyncStateCalled: func() []*data.NodeData {
+				require.Fail(t, "should have not been called")
+				return nil
+			},
+			UpdateNodesBasedOnSyncStateCalled: func(nodesWithSyncStatus []*data.NodeData) {
+				require.Fail(t, "should have not been called")
+			},
+			PrintNodesInShardsCalled: func() {
+				atomic.AddUint32(&numPrintNodesInShardsCalled, 1)
+			},
+		},
+		&mock.ObserversProviderStub{},
+		&mock.PubKeyConverterMock{},
+		true,
+	)
+
+	bp.SetNodeStatusFetcher(func(url string) (*data.NodeStatusAPIResponse, int, error) {
+		require.Fail(t, "should have not been called")
+
+		return nil, 400, nil
+	})
+	bp.SetDelayForCheckingNodesSyncState(5 * time.Millisecond)
+	bp.StartNodesSyncStateChecks()
+
+	time.Sleep(50 * time.Millisecond)
+
+	require.GreaterOrEqual(t, atomic.LoadUint32(&numPrintNodesInShardsCalled), uint32(1))
 
 	_ = bp.Close()
 	time.Sleep(50 * time.Millisecond)

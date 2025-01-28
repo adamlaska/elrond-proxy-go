@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ElrondNetwork/elrond-go-core/core/check"
-	"github.com/ElrondNetwork/elrond-proxy-go/api/groups"
-	"github.com/ElrondNetwork/elrond-proxy-go/api/mock"
-	"github.com/ElrondNetwork/elrond-proxy-go/common"
-	"github.com/ElrondNetwork/elrond-proxy-go/data"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/multiversx/mx-chain-core-go/core/check"
+	"github.com/multiversx/mx-chain-proxy-go/api/groups"
+	"github.com/multiversx/mx-chain-proxy-go/api/mock"
+	"github.com/multiversx/mx-chain-proxy-go/common"
+	"github.com/multiversx/mx-chain-proxy-go/data"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -37,8 +37,9 @@ func TestRateLimiter_IpRestrictionRaisedAndErased(t *testing.T) {
 	t.Parallel()
 
 	rl, err := NewRateLimiter(map[string]uint64{"/address/:address": 2}, time.Millisecond)
+	require.NoError(t, err)
 
-	facade := &mock.Facade{
+	facade := &mock.FacadeStub{
 		GetAccountHandler: func(address string, _ common.AccountQueryOptions) (*data.AccountModel, error) {
 			return &data.AccountModel{
 				Account: data.Account{
@@ -81,8 +82,9 @@ func TestRateLimiter_EndpointNotLimitedShouldNotRaiseRestrictions(t *testing.T) 
 	t.Parallel()
 
 	rl, err := NewRateLimiter(map[string]uint64{"/address/:address/nonce": 1}, time.Millisecond)
+	require.NoError(t, err)
 
-	facade := &mock.Facade{
+	facade := &mock.FacadeStub{
 		GetAccountHandler: func(address string, _ common.AccountQueryOptions) (*data.AccountModel, error) {
 			return &data.AccountModel{
 				Account: data.Account{

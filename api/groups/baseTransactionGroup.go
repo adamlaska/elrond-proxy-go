@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/ElrondNetwork/elrond-proxy-go/api/errors"
-	"github.com/ElrondNetwork/elrond-proxy-go/api/shared"
-	"github.com/ElrondNetwork/elrond-proxy-go/common"
-	"github.com/ElrondNetwork/elrond-proxy-go/data"
 	"github.com/gin-gonic/gin"
+	"github.com/multiversx/mx-chain-proxy-go/api/errors"
+	"github.com/multiversx/mx-chain-proxy-go/api/shared"
+	"github.com/multiversx/mx-chain-proxy-go/common"
+	"github.com/multiversx/mx-chain-proxy-go/data"
 )
 
 type transactionGroup struct {
@@ -36,6 +36,7 @@ func NewTransactionGroup(facadeHandler data.FacadeHandler) (*transactionGroup, e
 		{Path: "/send-user-funds", Handler: tg.sendUserFunds, Method: http.MethodPost},
 		{Path: "/cost", Handler: tg.requestTransactionCost, Method: http.MethodPost},
 		{Path: "/:txhash/status", Handler: tg.getTransactionStatus, Method: http.MethodGet},
+		{Path: "/:txhash/process-status", Handler: tg.getProcessedTransactionStatus, Method: http.MethodGet},
 		{Path: "/:txhash", Handler: tg.getTransaction, Method: http.MethodGet},
 		{Path: "/pool", Handler: tg.getTransactionsPool, Method: http.MethodGet},
 	}
@@ -247,6 +248,22 @@ func (group *transactionGroup) getTransaction(c *gin.Context) {
 	shared.RespondWith(c, http.StatusOK, gin.H{"transaction": tx}, "", data.ReturnCodeSuccess)
 }
 
+func (group *transactionGroup) getProcessedTransactionStatus(c *gin.Context) {
+	txHash := c.Param("txhash")
+	if txHash == "" {
+		shared.RespondWith(c, http.StatusBadRequest, nil, errors.ErrTransactionHashMissing.Error(), data.ReturnCodeRequestError)
+		return
+	}
+
+	status, err := group.facade.GetProcessedTransactionStatus(txHash)
+	if err != nil {
+		shared.RespondWith(c, http.StatusInternalServerError, nil, err.Error(), data.ReturnCodeInternalError)
+		return
+	}
+
+	shared.RespondWith(c, http.StatusOK, gin.H{"status": status.Status, "reason": status.Reason}, "", data.ReturnCodeSuccess)
+}
+
 func getTransactionByHashAndSenderAddress(c *gin.Context, ef TransactionFacadeHandler, txHash string, sndAddr string, withEvents bool) {
 	tx, statusCode, err := ef.GetTransactionByHashAndSenderAddress(txHash, sndAddr, withEvents)
 	if err != nil {
@@ -318,6 +335,10 @@ func validateOptions(options common.TransactionsPoolOptions) error {
 
 	if options.Sender == "" && options.NonceGaps {
 		return errors.ErrEmptySenderToGetNonceGaps
+	}
+
+	if options.Fields == "*" {
+		return nil
 	}
 
 	if options.Fields != "" {

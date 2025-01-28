@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ElrondNetwork/elrond-proxy-go/data"
-	"github.com/ElrondNetwork/elrond-proxy-go/process"
-	"github.com/ElrondNetwork/elrond-proxy-go/process/mock"
+	"github.com/multiversx/mx-chain-core-go/core"
+	"github.com/multiversx/mx-chain-proxy-go/data"
+	"github.com/multiversx/mx-chain-proxy-go/process"
+	"github.com/multiversx/mx-chain-proxy-go/process/mock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -120,7 +121,7 @@ func TestNodeGroupProcessor_GetHeartbeatDataOkValuesShouldPass(t *testing.T) {
 		GetShardIDsCalled: func() []uint32 {
 			return providedShardIDs
 		},
-		GetObserversCalled: func(shardId uint32) ([]*data.NodeData, error) {
+		GetObserversCalled: func(shardId uint32, dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
 			assert.Contains(t, providedShardIDs, shardId)
 
 			var obs []*data.NodeData
@@ -211,7 +212,7 @@ func TestNodeGroupProcessor_GetHeartbeatDataShouldReturnDataFromApiBecauseCacheD
 			GetShardIDsCalled: func() []uint32 {
 				return []uint32{providedShardID}
 			},
-			GetObserversCalled: func(shardId uint32) ([]*data.NodeData, error) {
+			GetObserversCalled: func(shardId uint32, dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
 				assert.Equal(t, providedShardID, shardId)
 				var obs []*data.NodeData
 				obs = append(obs, &data.NodeData{
@@ -327,7 +328,7 @@ func TestNodeGroupProcessor_GetHeartbeatDataShouldReturnDataFromApiBecauseCacheD
 			GetShardIDsCalled: func() []uint32 {
 				return []uint32{providedShardID0, providedShardID1}
 			},
-			GetObserversCalled: func(shardId uint32) ([]*data.NodeData, error) {
+			GetObserversCalled: func(shardId uint32, dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
 				var obs []*data.NodeData
 				switch counter {
 				case 0:
@@ -406,7 +407,7 @@ func TestNodeGroupProcessor_CacheShouldUpdate(t *testing.T) {
 		GetShardIDsCalled: func() []uint32 {
 			return []uint32{providedShardID}
 		},
-		GetObserversCalled: func(shardId uint32) ([]*data.NodeData, error) {
+		GetObserversCalled: func(shardId uint32, dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
 			assert.Equal(t, providedShardID, shardId)
 			var obs []*data.NodeData
 			obs = append(obs, &data.NodeData{
@@ -470,7 +471,7 @@ func TestNodeGroupProcessor_NoDataForAShardShouldNotUpdateCache(t *testing.T) {
 			GetShardIDsCalled: func() []uint32 {
 				return []uint32{providedShardID0, providedShardID1}
 			},
-			GetObserversCalled: func(shardId uint32) ([]*data.NodeData, error) {
+			GetObserversCalled: func(shardId uint32, dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
 				var obs []*data.NodeData
 				if shardId == providedShardID0 {
 					obs = append(obs, &data.NodeData{
@@ -524,7 +525,7 @@ func TestNodeGroupProcessor_IsOldStorageForToken(t *testing.T) {
 
 		proc, _ := process.NewNodeGroupProcessor(
 			&mock.ProcessorStub{
-				GetAllObserversCalled: func() ([]*data.NodeData, error) {
+				GetAllObserversCalled: func(dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
 					return []*data.NodeData{
 						{Address: "addr0", ShardId: 0},
 						{Address: "addr1", ShardId: 1},
@@ -539,7 +540,7 @@ func TestNodeGroupProcessor_IsOldStorageForToken(t *testing.T) {
 		)
 
 		_, err := proc.IsOldStorageForToken("token", 37)
-		require.Equal(t, process.ErrSendingRequest, err)
+		require.True(t, errors.Is(err, process.ErrSendingRequest))
 	})
 
 	t.Run("some observers fail, should return error", func(t *testing.T) {
@@ -547,7 +548,7 @@ func TestNodeGroupProcessor_IsOldStorageForToken(t *testing.T) {
 
 		proc, _ := process.NewNodeGroupProcessor(
 			&mock.ProcessorStub{
-				GetAllObserversCalled: func() ([]*data.NodeData, error) {
+				GetAllObserversCalled: func(dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
 					return []*data.NodeData{
 						{Address: "addr0", ShardId: 0},
 						{Address: "addr1", ShardId: 1},
@@ -565,7 +566,7 @@ func TestNodeGroupProcessor_IsOldStorageForToken(t *testing.T) {
 		)
 
 		_, err := proc.IsOldStorageForToken("token", 37)
-		require.Equal(t, process.ErrSendingRequest, err)
+		require.True(t, errors.Is(err, process.ErrSendingRequest))
 	})
 
 	t.Run("should work and return false", func(t *testing.T) {
@@ -573,7 +574,7 @@ func TestNodeGroupProcessor_IsOldStorageForToken(t *testing.T) {
 
 		proc, _ := process.NewNodeGroupProcessor(
 			&mock.ProcessorStub{
-				GetAllObserversCalled: func() ([]*data.NodeData, error) {
+				GetAllObserversCalled: func(dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
 					return []*data.NodeData{
 						{Address: "addr0", ShardId: 0},
 						{Address: "addr1", ShardId: 1},
@@ -599,7 +600,7 @@ func TestNodeGroupProcessor_IsOldStorageForToken(t *testing.T) {
 
 		proc, _ := process.NewNodeGroupProcessor(
 			&mock.ProcessorStub{
-				GetAllObserversCalled: func() ([]*data.NodeData, error) {
+				GetAllObserversCalled: func(dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
 					return []*data.NodeData{
 						{Address: "addr0", ShardId: 0},
 						{Address: "addr1", ShardId: 1},
@@ -628,6 +629,91 @@ func TestComputeTokenStorageKey(t *testing.T) {
 	require.Equal(t, "454c524f4e4465736474455254574f2d3364313934340284", process.ComputeTokenStorageKey("ERTWO-3d1944", 644))
 
 	testTokenID, testNonce := "TESTTKN", uint64(89)
-	expectedKey := append(append([]byte("ELRONDesdt"), []byte(testTokenID)...), big.NewInt(int64(testNonce)).Bytes()...)
+	expectedKey := append(append([]byte(core.ProtectedKeyPrefix+"esdt"), []byte(testTokenID)...), big.NewInt(int64(testNonce)).Bytes()...)
 	require.Equal(t, hex.EncodeToString(expectedKey), process.ComputeTokenStorageKey(testTokenID, testNonce))
+}
+
+func TestNodeGroupProcessor_GetWaitingEpochsLeftForPublicKey(t *testing.T) {
+	t.Parallel()
+
+	expectedErr := errors.New("expected error")
+	t.Run("empty pub key should error", func(t *testing.T) {
+		t.Parallel()
+
+		proc, _ := process.NewNodeGroupProcessor(
+			&mock.ProcessorStub{},
+			&mock.HeartbeatCacherMock{},
+			10,
+		)
+
+		response, err := proc.GetWaitingEpochsLeftForPublicKey("")
+		require.Nil(t, response)
+		require.Equal(t, process.ErrEmptyPubKey, err)
+	})
+	t.Run("GetAllObservers returns error should error", func(t *testing.T) {
+		t.Parallel()
+
+		proc, _ := process.NewNodeGroupProcessor(
+			&mock.ProcessorStub{
+				GetAllObserversCalled: func(dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
+					return nil, expectedErr
+				},
+			},
+			&mock.HeartbeatCacherMock{},
+			10,
+		)
+
+		response, err := proc.GetWaitingEpochsLeftForPublicKey("key")
+		require.Nil(t, response)
+		require.Equal(t, expectedErr, err)
+	})
+	t.Run("all observers return error should error", func(t *testing.T) {
+		t.Parallel()
+
+		proc, _ := process.NewNodeGroupProcessor(
+			&mock.ProcessorStub{
+				GetAllObserversCalled: func(dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
+					return []*data.NodeData{
+						{Address: "addr0", ShardId: 0},
+						{Address: "addr1", ShardId: 1},
+					}, nil
+				},
+				CallGetRestEndPointCalled: func(address string, path string, value interface{}) (int, error) {
+					return 0, expectedErr
+				},
+			},
+			&mock.HeartbeatCacherMock{},
+			10,
+		)
+
+		response, err := proc.GetWaitingEpochsLeftForPublicKey("key")
+		require.Nil(t, response)
+		require.True(t, errors.Is(err, process.ErrSendingRequest))
+	})
+	t.Run("should work", func(t *testing.T) {
+		t.Parallel()
+
+		providedEpochsLeft := uint32(10)
+		proc, _ := process.NewNodeGroupProcessor(
+			&mock.ProcessorStub{
+				GetAllObserversCalled: func(dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error) {
+					return []*data.NodeData{
+						{Address: "addr0", ShardId: 0},
+						{Address: "addr1", ShardId: 1},
+					}, nil
+				},
+				CallGetRestEndPointCalled: func(address string, path string, value interface{}) (int, error) {
+					valResponse := value.(*data.WaitingEpochsLeftApiResponse)
+					valResponse.Data.EpochsLeft = providedEpochsLeft
+					return 0, nil
+				},
+			},
+			&mock.HeartbeatCacherMock{},
+			10,
+		)
+
+		response, err := proc.GetWaitingEpochsLeftForPublicKey("key")
+		require.NoError(t, err)
+		require.Equal(t, providedEpochsLeft, response.Data.EpochsLeft)
+	})
 }

@@ -1,6 +1,6 @@
 package mock
 
-import "github.com/ElrondNetwork/elrond-proxy-go/data"
+import "github.com/multiversx/mx-chain-proxy-go/data"
 
 // ValidatorStatisticsProcessorStub -
 type ValidatorStatisticsProcessorStub struct {
@@ -10,4 +10,9 @@ type ValidatorStatisticsProcessorStub struct {
 // GetValidatorStatistics -
 func (v *ValidatorStatisticsProcessorStub) GetValidatorStatistics() (*data.ValidatorStatisticsResponse, error) {
 	return v.GetValidatorStatisticsCalled()
+}
+
+// GetAuctionList -
+func (v *ValidatorStatisticsProcessorStub) GetAuctionList() (*data.AuctionListResponse, error) {
+	return nil, nil
 }

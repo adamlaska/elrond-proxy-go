@@ -36,7 +36,10 @@ var ErrNilValidatorStatisticsCacher = errors.New("nil validator statistics cache
 var ErrNilEconomicMetricsCacher = errors.New("nil economic metrics cacher")
 
 // ErrValidatorStatisticsNotAvailable signals that the validator statistics data is not found
-var ErrValidatorStatisticsNotAvailable = errors.New("validator statistics data not found at any observer")
+var ErrValidatorStatisticsNotAvailable = errors.New("validator statistics data not found on any observer")
+
+// ErrAuctionListNotAvailable signals that the auction list data is not found
+var ErrAuctionListNotAvailable = errors.New("auction list data not found on any observer")
 
 // ErrInvalidCacheValidityDuration signals that the given validity duration for cache data is invalid
 var ErrInvalidCacheValidityDuration = errors.New("invalid cache validity duration")
@@ -53,17 +56,11 @@ var ErrNoFaucetAccountForGivenShard = errors.New("no faucet account found for th
 // ErrNilNodesProvider signals that a nil observers provider has been provided
 var ErrNilNodesProvider = errors.New("nil nodes provider")
 
-// ErrInvalidShardId signals that a invalid shard id has been provided
-var ErrInvalidShardId = errors.New("invalid shard id")
-
 // ErrNilPubKeyConverter signals that a nil pub key converter has been provided
 var ErrNilPubKeyConverter = errors.New("nil pub key converter provided")
 
 // ErrNoValidTransactionToSend signals that no valid transaction were received
 var ErrNoValidTransactionToSend = errors.New("no valid transaction to send")
-
-// ErrNilDatabaseConnector signals that a nil database connector was provided
-var ErrNilDatabaseConnector = errors.New("not valid database connector")
 
 // ErrCannotParseNodeStatusMetrics signals that the node status metrics cannot be parsed
 var ErrCannotParseNodeStatusMetrics = errors.New("cannot parse node status metrics")
@@ -103,3 +100,15 @@ var ErrInvalidOutputFormat = errors.New("the output format type is invalid")
 
 // ErrNilStatusMetricsProvider signals that a nil status metrics provider has been given
 var ErrNilStatusMetricsProvider = errors.New("nil status metrics provider")
+
+// ErrEmptyAppVersionString signals than an empty app version string has been provided
+var ErrEmptyAppVersionString = errors.New("empty app version string")
+
+// ErrEmptyCommitString signals than an empty commit id string has been provided
+var ErrEmptyCommitString = errors.New("empty commit id string")
+
+// ErrEmptyPubKey signals that an empty public key has been provided
+var ErrEmptyPubKey = errors.New("public key is empty")
+
+// ErrNilHttpClient signals that a nil http client has been provided
+var ErrNilHttpClient = errors.New("nil http client")

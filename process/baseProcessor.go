@@ -6,19 +6,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/ElrondNetwork/elrond-go-core/core"
-	"github.com/ElrondNetwork/elrond-go-core/core/check"
-	logger "github.com/ElrondNetwork/elrond-go-logger"
-	"github.com/ElrondNetwork/elrond-go/sharding"
-	proxyData "github.com/ElrondNetwork/elrond-proxy-go/data"
-	"github.com/ElrondNetwork/elrond-proxy-go/observer"
+	"github.com/multiversx/mx-chain-core-go/core"
+	"github.com/multiversx/mx-chain-core-go/core/check"
+	logger "github.com/multiversx/mx-chain-logger-go"
+	"github.com/multiversx/mx-chain-proxy-go/common"
+	proxyData "github.com/multiversx/mx-chain-proxy-go/data"
+	"github.com/multiversx/mx-chain-proxy-go/observer"
 )
 
 var log = logger.GetOrCreate("process")
@@ -30,11 +30,10 @@ const (
 	timeoutDurationForNodeStatus       = 2 * time.Second
 )
 
-// BaseProcessor represents an implementation of CoreProcessor that helps
-// processing requests
+// BaseProcessor represents an implementation of CoreProcessor that helps to process requests
 type BaseProcessor struct {
 	mutState                       sync.RWMutex
-	shardCoordinator               sharding.Coordinator
+	shardCoordinator               common.Coordinator
 	observersProvider              observer.NodesProviderHandler
 	fullHistoryNodesProvider       observer.NodesProviderHandler
 	pubKeyConverter                core.PubkeyConverter
@@ -43,6 +42,7 @@ type BaseProcessor struct {
 	chanTriggerNodesState          chan struct{}
 	delayForCheckingNodesSyncState time.Duration
 	cancelFunc                     func()
+	noStatusCheck                  bool
 
 	httpClient *http.Client
 }
@@ -50,10 +50,11 @@ type BaseProcessor struct {
 // NewBaseProcessor creates a new instance of BaseProcessor struct
 func NewBaseProcessor(
 	requestTimeoutSec int,
-	shardCoord sharding.Coordinator,
+	shardCoord common.Coordinator,
 	observersProvider observer.NodesProviderHandler,
 	fullHistoryNodesProvider observer.NodesProviderHandler,
 	pubKeyConverter core.PubkeyConverter,
+	noStatusCheck bool,
 ) (*BaseProcessor, error) {
 	if check.IfNil(shardCoord) {
 		return nil, ErrNilShardCoordinator
@@ -85,8 +86,13 @@ func NewBaseProcessor(
 		shardIDs:                       computeShardIDs(shardCoord),
 		delayForCheckingNodesSyncState: stepDelayForCheckingNodesSyncState,
 		chanTriggerNodesState:          make(chan struct{}),
+		noStatusCheck:                  noStatusCheck,
 	}
 	bp.nodeStatusFetcher = bp.getNodeStatusResponseFromAPI
+
+	if noStatusCheck {
+		log.Info("Proxy started with no status check! The provided observers will always be considered synced!")
+	}
 
 	return bp, nil
 }
@@ -120,43 +126,44 @@ func (bp *BaseProcessor) ReloadFullHistoryObservers() proxyData.NodesReloadRespo
 }
 
 // GetObservers returns the registered observers on a shard
-func (bp *BaseProcessor) GetObservers(shardID uint32) ([]*proxyData.NodeData, error) {
-	return bp.observersProvider.GetNodesByShardId(shardID)
+func (bp *BaseProcessor) GetObservers(shardID uint32, dataAvailability proxyData.ObserverDataAvailabilityType) ([]*proxyData.NodeData, error) {
+	return bp.observersProvider.GetNodesByShardId(shardID, dataAvailability)
 }
 
 // GetAllObservers will return all the observers, regardless of shard ID
-func (bp *BaseProcessor) GetAllObservers() ([]*proxyData.NodeData, error) {
-	return bp.observersProvider.GetAllNodes()
+func (bp *BaseProcessor) GetAllObservers(dataAvailability proxyData.ObserverDataAvailabilityType) ([]*proxyData.NodeData, error) {
+	return bp.observersProvider.GetAllNodes(dataAvailability)
 }
 
 // GetObserversOnePerShard will return a slice containing an observer for each shard
-func (bp *BaseProcessor) GetObserversOnePerShard() ([]*proxyData.NodeData, error) {
-	return bp.getNodesOnePerShard(bp.observersProvider.GetNodesByShardId)
+func (bp *BaseProcessor) GetObserversOnePerShard(dataAvailability proxyData.ObserverDataAvailabilityType) ([]*proxyData.NodeData, error) {
+	return bp.getNodesOnePerShard(bp.observersProvider.GetNodesByShardId, dataAvailability)
 }
 
 // GetFullHistoryNodes returns the registered full history nodes on a shard
-func (bp *BaseProcessor) GetFullHistoryNodes(shardID uint32) ([]*proxyData.NodeData, error) {
-	return bp.fullHistoryNodesProvider.GetNodesByShardId(shardID)
+func (bp *BaseProcessor) GetFullHistoryNodes(shardID uint32, dataAvailability proxyData.ObserverDataAvailabilityType) ([]*proxyData.NodeData, error) {
+	return bp.fullHistoryNodesProvider.GetNodesByShardId(shardID, dataAvailability)
 }
 
 // GetAllFullHistoryNodes will return all the full history nodes, regardless of shard ID
-func (bp *BaseProcessor) GetAllFullHistoryNodes() ([]*proxyData.NodeData, error) {
-	return bp.fullHistoryNodesProvider.GetAllNodes()
+func (bp *BaseProcessor) GetAllFullHistoryNodes(dataAvailability proxyData.ObserverDataAvailabilityType) ([]*proxyData.NodeData, error) {
+	return bp.fullHistoryNodesProvider.GetAllNodes(dataAvailability)
 }
 
 // GetFullHistoryNodesOnePerShard will return a slice containing a full history node for each shard
-func (bp *BaseProcessor) GetFullHistoryNodesOnePerShard() ([]*proxyData.NodeData, error) {
-	return bp.getNodesOnePerShard(bp.fullHistoryNodesProvider.GetNodesByShardId)
+func (bp *BaseProcessor) GetFullHistoryNodesOnePerShard(dataAvailability proxyData.ObserverDataAvailabilityType) ([]*proxyData.NodeData, error) {
+	return bp.getNodesOnePerShard(bp.fullHistoryNodesProvider.GetNodesByShardId, dataAvailability)
 }
 
 func (bp *BaseProcessor) getNodesOnePerShard(
-	observersInShardGetter func(shardID uint32) ([]*proxyData.NodeData, error),
+	observersInShardGetter func(shardID uint32, dataAvailability proxyData.ObserverDataAvailabilityType) ([]*proxyData.NodeData, error),
+	dataAvailability proxyData.ObserverDataAvailabilityType,
 ) ([]*proxyData.NodeData, error) {
 	numShards := bp.shardCoordinator.NumberOfShards()
 	sliceToReturn := make([]*proxyData.NodeData, 0)
 
 	for shardID := uint32(0); shardID < numShards; shardID++ {
-		observersInShard, err := observersInShardGetter(shardID)
+		observersInShard, err := observersInShardGetter(shardID, dataAvailability)
 		if err != nil || len(observersInShard) < 1 {
 			continue
 		}
@@ -164,7 +171,7 @@ func (bp *BaseProcessor) getNodesOnePerShard(
 		sliceToReturn = append(sliceToReturn, observersInShard[0])
 	}
 
-	observersInShardMeta, err := observersInShardGetter(core.MetachainShardId)
+	observersInShardMeta, err := observersInShardGetter(core.MetachainShardId, dataAvailability)
 	if err == nil && len(observersInShardMeta) > 0 {
 		sliceToReturn = append(sliceToReturn, observersInShardMeta[0])
 	}
@@ -196,18 +203,17 @@ func (bp *BaseProcessor) CallGetRestEndPoint(
 		return http.StatusInternalServerError, err
 	}
 
-	userAgent := "Elrond Proxy / 1.0.0 <Requesting data from nodes>"
+	userAgent := "Multiversx Proxy / 1.0.0 <Requesting data from nodes>"
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := bp.httpClient.Do(req)
 	if err != nil {
+		bp.triggerNodesSyncCheck(address)
 		if isTimeoutError(err) {
-			bp.triggerNodesSyncCheck(address)
 			return http.StatusRequestTimeout, err
 		}
 
-		bp.triggerNodesSyncCheck(address)
 		return http.StatusNotFound, err
 	}
 
@@ -218,7 +224,7 @@ func (bp *BaseProcessor) CallGetRestEndPoint(
 		}
 	}()
 
-	responseBodyBytes, err := ioutil.ReadAll(resp.Body)
+	responseBodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return http.StatusInternalServerError, err
 	}
@@ -255,19 +261,18 @@ func (bp *BaseProcessor) CallPostRestEndPoint(
 		return http.StatusInternalServerError, err
 	}
 
-	userAgent := "Elrond Proxy / 1.0.0 <Posting to nodes>"
+	userAgent := "Multiversx Proxy / 1.0.0 <Posting to nodes>"
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := bp.httpClient.Do(req)
 	if err != nil {
+		bp.triggerNodesSyncCheck(address)
 		if isTimeoutError(err) {
-			bp.triggerNodesSyncCheck(address)
 			return http.StatusRequestTimeout, err
 		}
 
-		bp.triggerNodesSyncCheck(address)
 		return http.StatusNotFound, err
 	}
 
@@ -278,7 +283,7 @@ func (bp *BaseProcessor) CallPostRestEndPoint(
 		}
 	}()
 
-	responseBodyBytes, err := ioutil.ReadAll(resp.Body)
+	responseBodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return http.StatusInternalServerError, err
 	}
@@ -315,7 +320,7 @@ func isTimeoutError(err error) bool {
 }
 
 // GetShardCoordinator returns the shard coordinator
-func (bp *BaseProcessor) GetShardCoordinator() sharding.Coordinator {
+func (bp *BaseProcessor) GetShardCoordinator() common.Coordinator {
 	return bp.shardCoordinator
 }
 
@@ -334,7 +339,7 @@ func (bp *BaseProcessor) GetFullHistoryNodesProvider() observer.NodesProviderHan
 	return bp.fullHistoryNodesProvider
 }
 
-func computeShardIDs(shardCoordinator sharding.Coordinator) []uint32 {
+func computeShardIDs(shardCoordinator common.Coordinator) []uint32 {
 	shardIDs := make([]uint32, 0)
 	for i := uint32(0); i < shardCoordinator.NumberOfShards(); i++ {
 		shardIDs = append(shardIDs, i)
@@ -349,7 +354,7 @@ func (bp *BaseProcessor) handleOutOfSyncNodes(ctx context.Context) {
 	timer := time.NewTimer(bp.delayForCheckingNodesSyncState)
 	defer timer.Stop()
 
-	bp.updateNodesWithSync()
+	bp.handleNodes()
 	for {
 		timer.Reset(bp.delayForCheckingNodesSyncState)
 
@@ -361,8 +366,20 @@ func (bp *BaseProcessor) handleOutOfSyncNodes(ctx context.Context) {
 			return
 		}
 
-		bp.updateNodesWithSync()
+		bp.handleNodes()
 	}
+}
+
+func (bp *BaseProcessor) handleNodes() {
+	// if proxy is started with no-status-check flag, only print the observers.
+	// they are already initialized by default as synced.
+	if bp.noStatusCheck {
+		bp.observersProvider.PrintNodesInShards()
+		bp.fullHistoryNodesProvider.PrintNodesInShards()
+		return
+	}
+
+	bp.updateNodesWithSync()
 }
 
 func (bp *BaseProcessor) updateNodesWithSync() {
@@ -421,6 +438,7 @@ func (bp *BaseProcessor) isNodeSynced(node *proxyData.NodeData) (bool, error) {
 		"probable highest nonce", probableHighestNonce,
 		"is synced", isNodeSynced,
 		"is ready for VM Queries", isReadyForVMQueries,
+		"is snapshotless", node.IsSnapshotless,
 		"is fallback", node.IsFallback)
 
 	if !isReadyForVMQueries {
@@ -454,7 +472,7 @@ func (bp *BaseProcessor) getNodeStatusResponseFromAPI(url string) (*proxyData.No
 		return nil, resp.StatusCode, nil
 	}
 
-	responseBodyBytes, err := ioutil.ReadAll(resp.Body)
+	responseBodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
 	}
@@ -470,11 +488,7 @@ func (bp *BaseProcessor) getNodeStatusResponseFromAPI(url string) (*proxyData.No
 }
 
 func parseBool(metricValue string) bool {
-	if strconv.FormatBool(true) == metricValue {
-		return true
-	}
-
-	return false
+	return strconv.FormatBool(true) == metricValue
 }
 
 // IsInterfaceNil returns true if there is no value under the interface

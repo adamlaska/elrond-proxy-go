@@ -1,38 +1,33 @@
 package process
 
 import (
-	"github.com/ElrondNetwork/elrond-go-core/core"
-	"github.com/ElrondNetwork/elrond-go-core/data/transaction"
-	"github.com/ElrondNetwork/elrond-go-core/data/vm"
-	"github.com/ElrondNetwork/elrond-go-crypto"
-	"github.com/ElrondNetwork/elrond-go/sharding"
-	"github.com/ElrondNetwork/elrond-proxy-go/data"
-	"github.com/ElrondNetwork/elrond-proxy-go/observer"
+	"net/http"
+
+	"github.com/multiversx/mx-chain-core-go/core"
+	"github.com/multiversx/mx-chain-core-go/data/transaction"
+	"github.com/multiversx/mx-chain-core-go/data/vm"
+	crypto "github.com/multiversx/mx-chain-crypto-go"
+	"github.com/multiversx/mx-chain-proxy-go/common"
+	"github.com/multiversx/mx-chain-proxy-go/data"
+	"github.com/multiversx/mx-chain-proxy-go/observer"
 )
 
 // Processor defines what a processor should be able to do
 type Processor interface {
-	GetObservers(shardID uint32) ([]*data.NodeData, error)
-	GetAllObservers() ([]*data.NodeData, error)
-	GetObserversOnePerShard() ([]*data.NodeData, error)
-	GetFullHistoryNodesOnePerShard() ([]*data.NodeData, error)
-	GetFullHistoryNodes(shardID uint32) ([]*data.NodeData, error)
-	GetAllFullHistoryNodes() ([]*data.NodeData, error)
+	GetObservers(shardID uint32, dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error)
+	GetAllObservers(dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error)
+	GetObserversOnePerShard(dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error)
+	GetFullHistoryNodesOnePerShard(dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error)
+	GetFullHistoryNodes(shardID uint32, dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error)
+	GetAllFullHistoryNodes(dataAvailability data.ObserverDataAvailabilityType) ([]*data.NodeData, error)
 	GetShardIDs() []uint32
 	ComputeShardId(addressBuff []byte) (uint32, error)
 	CallGetRestEndPoint(address string, path string, value interface{}) (int, error)
 	CallPostRestEndPoint(address string, path string, data interface{}, response interface{}) (int, error)
-	GetShardCoordinator() sharding.Coordinator
+	GetShardCoordinator() common.Coordinator
 	GetPubKeyConverter() core.PubkeyConverter
 	GetObserverProvider() observer.NodesProviderHandler
 	GetFullHistoryNodesProvider() observer.NodesProviderHandler
-	IsInterfaceNil() bool
-}
-
-// ExternalStorageConnector defines what a external storage connector should be able to do
-type ExternalStorageConnector interface {
-	GetTransactionsByAddress(address string) ([]data.DatabaseTransaction, error)
-	GetAtlasBlockByShardIDAndNonce(shardID uint32, nonce uint64) (data.AtlasBlock, error)
 	IsInterfaceNil() bool
 }
 
@@ -75,7 +70,7 @@ type LogsMergerHandler interface {
 
 // SCQueryService defines how data should be get from a SC account
 type SCQueryService interface {
-	ExecuteQuery(query *data.SCQuery) (*vm.VMOutputApi, error)
+	ExecuteQuery(query *data.SCQuery) (*vm.VMOutputApi, data.BlockInfo, error)
 	IsInterfaceNil() bool
 }
 
@@ -84,4 +79,9 @@ type StatusMetricsProvider interface {
 	GetAll() map[string]*data.EndpointMetrics
 	GetMetricsForPrometheus() string
 	IsInterfaceNil() bool
+}
+
+// HttpClient defines an interface for the http client
+type HttpClient interface {
+	Do(req *http.Request) (*http.Response, error)
 }

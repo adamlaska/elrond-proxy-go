@@ -3,28 +3,32 @@ package data
 import (
 	"math/big"
 
-	"github.com/ElrondNetwork/elrond-go-core/core"
-	"github.com/ElrondNetwork/elrond-go-core/core/check"
-	"github.com/ElrondNetwork/elrond-go-core/data/transaction"
+	"github.com/multiversx/mx-chain-core-go/core"
+	"github.com/multiversx/mx-chain-core-go/core/check"
+	"github.com/multiversx/mx-chain-core-go/data/transaction"
 )
 
 // Transaction represents the structure that maps and validates user input for publishing a new transaction
 type Transaction struct {
 	// This field is used to tag transactions for send-multiple route
-	Index            int    `json:"-"`
-	Nonce            uint64 `json:"nonce"`
-	Value            string `json:"value"`
-	Receiver         string `json:"receiver"`
-	Sender           string `json:"sender"`
-	SenderUsername   []byte `json:"senderUsername,omitempty"`
-	ReceiverUsername []byte `json:"receiverUsername,omitempty"`
-	GasPrice         uint64 `json:"gasPrice"`
-	GasLimit         uint64 `json:"gasLimit"`
-	Data             []byte `json:"data,omitempty"`
-	Signature        string `json:"signature,omitempty"`
-	ChainID          string `json:"chainID"`
-	Version          uint32 `json:"version"`
-	Options          uint32 `json:"options,omitempty"`
+	Index             int    `json:"-"`
+	Nonce             uint64 `json:"nonce"`
+	Value             string `json:"value"`
+	Receiver          string `json:"receiver"`
+	Sender            string `json:"sender"`
+	SenderUsername    []byte `json:"senderUsername,omitempty"`
+	ReceiverUsername  []byte `json:"receiverUsername,omitempty"`
+	GasPrice          uint64 `json:"gasPrice"`
+	GasLimit          uint64 `json:"gasLimit"`
+	Data              []byte `json:"data,omitempty"`
+	Signature         string `json:"signature,omitempty"`
+	ChainID           string `json:"chainID"`
+	Version           uint32 `json:"version"`
+	Options           uint32 `json:"options,omitempty"`
+	GuardianAddr      string `json:"guardian,omitempty"`
+	GuardianSignature string `json:"guardianSignature,omitempty"`
+	RelayerAddr       string `json:"relayer,omitempty"`
+	RelayerSignature  string `json:"relayerSignature,omitempty"`
 }
 
 // GetTransactionResponseData follows the format of the data field of get transaction response
@@ -39,7 +43,19 @@ type GetTransactionResponse struct {
 	Code  string                     `json:"code"`
 }
 
-// transactionWrapper is a wrapper over a normal transaction in order to implement the interface needed in elrond-go
+// GetSCRsResponseData follows the format of the data field of get smart contract results response
+type GetSCRsResponseData struct {
+	SCRs []*transaction.ApiSmartContractResult `json:"scrs"`
+}
+
+// GetSCRsResponse defines a response from the node holding the smart contract results
+type GetSCRsResponse struct {
+	Data  GetSCRsResponseData `json:"data"`
+	Error string              `json:"error"`
+	Code  string              `json:"code"`
+}
+
+// transactionWrapper is a wrapper over a normal transaction in order to implement the interface needed in mx-chain-go
 // for computing gas cost for a transaction
 type transactionWrapper struct {
 	transaction     *Transaction
@@ -155,6 +171,7 @@ type TxCostResponseData struct {
 	TxCost     uint64                                     `json:"txGasUnits"`
 	RetMessage string                                     `json:"returnMessage"`
 	ScResults  map[string]*ExtendedApiSmartContractResult `json:"smartContractResults"`
+	Logs       *transaction.ApiLogs                       `json:"logs,omitempty"`
 }
 
 // ExtendedApiSmartContractResult extends the structure transaction.ApiSmartContractResult with an extra field
@@ -263,4 +280,10 @@ type TransactionsPoolNonceGapsForSenderApiResponse struct {
 	Data  TransactionsPoolNonceGapsForSenderResponseData `json:"data"`
 	Error string                                         `json:"error"`
 	Code  string                                         `json:"code"`
+}
+
+// ProcessStatusResponse represents a structure that holds the process status of a transaction
+type ProcessStatusResponse struct {
+	Status string `json:"status"`
+	Reason string `json:"reason"`
 }
